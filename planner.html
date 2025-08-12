@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="./output.css" rel="stylesheet" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Borel&family=Pacifico&display=swap" rel="stylesheet">
+    <script src="https://kit.fontawesome.com/d879469828.js" crossorigin="anonymous"></script>
+    <title id="page-title"></title>
+</head>
+
+<body class="bg-neutral w-[85%] mx-auto">
+    <header class="flex justify-between">
+        <div class="flex flex-col items-center">
+            <h1 class="text-9xl text-nowrap font-main text-main underline py-4 text-shadow-lg text-shadow-black/20">
+                Good morning!
+            </h1>
+            <h2 class="text-3xl font-sec font-bold text-white text-right mr-14 py-3">
+                Today is <span id="today"></span>
+            </h2>
+        </div>
+        <img src="images/garland.png" alt="Morning Image" class="h-64 w-[50%] object-fill pt-10" />
+    </header>
+    <button id="download-today"
+        class="mt-12 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
+        Download Today
+    </button>
+
+
+    <div class="flex justify-between">
+        <!-- LEFT COLUMN ------------------------------------------------------->
+        <section class="py-32 flex flex-col gap-24 basis-1/4">
+
+            <!-- CARD: Morning -->
+            <div class="bg-white p-8 outline-4 outline-main rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+                data-checklist data-start="10" data-end="14" data-key="morning">
+                <img src="images/am.png" alt="Morning Image"
+                    class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-20" />
+                <div class="flex justify-between">
+                    <h3 class="text-4xl font-main font-bold text-main mb-4 tracking-widest">Morning</h3>
+                    <p class="text-3xl font-bold font-main self-center text-main">10:00 - 14:00</p>
+                </div>
+
+                <div class="mt-8">
+                    <form class="flex gap-3 justify-between" data-checklist-form>
+                        <div class="flex flex-col">
+                            <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                            focus:outline-none caret-accents" autocomplete="off" />
+                            <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                        </div>
+                        <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                           hover:bg-neutral transition-colors duration-300">
+                            Add
+                        </button>
+                    </form>
+                </div>
+
+                <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+
+                <!-- Optional static item -->
+                <div class="mt-4" data-smoke>
+                    <label class="flex items-center gap-3 cursor-pointer select-none">
+                        <input type="checkbox" class="sr-only" />
+                        <span data-role="box" class="inline-flex items-center justify-center size-6 rounded-full bg-white
+                         border-2 border-main transition-colors">
+                            <svg data-role="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                stroke-linecap="round" stroke-linejoin="round" class="size-4 text-main"
+                                style="opacity:0;transition:opacity .15s" aria-hidden="true">
+                                <path d="M5 12l5 5L19 7" />
+                            </svg>
+                        </span>
+                        <span data-role="label" class="flex-1 text-accents font-bold tracking-wide text-xl font-sec
+                         decoration-main decoration-2 mt-3">
+                            Smoke break?
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- CARD: Daytime -->
+            <div class="bg-white p-8 outline-4 outline-[#FECA6A] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+                data-checklist data-start="14" data-end="18" data-key="daytime">
+                <img src="images/mid.png" alt="Day Image"
+                    class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
+                <div class="flex justify-between">
+                    <h3 class="text-4xl font-main font-bold text-main mb-4 tracking-widest">Daytime</h3>
+                    <p class="text-3xl font-bold font-main self-center text-main">14:00 - 18:00</p>
+                </div>
+
+                <div class="mt-8">
+                    <form class="flex gap-3 justify-between" data-checklist-form>
+                        <div class="flex flex-col">
+                            <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                            focus:outline-none caret-accents" autocomplete="off" />
+                            <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                        </div>
+                        <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                           hover:bg-neutral transition-colors duration-300">
+                            Add
+                        </button>
+                    </form>
+                </div>
+
+                <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+
+                <div class="mt-4" data-smoke>
+                    <!-- same smoke block as above -->
+                    <label class="flex items-center gap-3 cursor-pointer select-none">
+                        <input type="checkbox" class="sr-only" />
+                        <span data-role="box"
+                            class="inline-flex items-center justify-center size-6 rounded-full bg-white border-2 border-main transition-colors">
+                            <svg data-role="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                stroke-linecap="round" stroke-linejoin="round" class="size-4 text-main"
+                                style="opacity:0;transition:opacity .15s" aria-hidden="true">
+                                <path d="M5 12l5 5L19 7" />
+                            </svg>
+                        </span>
+                        <span data-role="label"
+                            class="flex-1 text-accents font-bold tracking-wide text-xl font-sec decoration-main decoration-2 mt-3">
+                            Smoke break?
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- CARD: Evening -->
+            <div class="bg-white p-8 outline-4 outline-[#265171] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+                data-checklist data-start="18" data-end="22" data-key="evening">
+                <img src="images/pm.png" alt="Evening Image"
+                    class="absolute top-0 left-5 -translate-x-1/2 -translate-y-1/2 h-20" />
+                <div class="flex justify-between">
+                    <h3 class="text-4xl font-main font-bold text-main mb-4 tracking-widest">Evening</h3>
+                    <p class="text-3xl font-bold font-main self-center text-main">18:00 - 22:00</p>
+                </div>
+
+                <div class="mt-8">
+                    <form class="flex gap-3 justify-between" data-checklist-form>
+                        <div class="flex flex-col">
+                            <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                            focus:outline-none caret-accents" autocomplete="off" />
+                            <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                        </div>
+                        <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                           hover:bg-neutral transition-colors duration-300">
+                            Add
+                        </button>
+                    </form>
+                </div>
+
+                <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+
+                <div class="mt-4" data-smoke>
+                    <!-- same smoke block -->
+                    <label class="flex items-center gap-3 cursor-pointer select-none">
+                        <input type="checkbox" class="sr-only" />
+                        <span data-role="box"
+                            class="inline-flex items-center justify-center size-6 rounded-full bg-white border-2 border-main transition-colors">
+                            <svg data-role="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                stroke-linecap="round" stroke-linejoin="round" class="size-4 text-main"
+                                style="opacity:0;transition:opacity .15s" aria-hidden="true">
+                                <path d="M5 12l5 5L19 7" />
+                            </svg>
+                        </span>
+                        <span data-role="label"
+                            class="flex-1 text-accents font-bold tracking-wide text-xl font-sec decoration-main decoration-2 mt-3">
+                            Smoke break?
+                        </span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT COLUMN (Work) ---------------------------------------------->
+        <section class="py-32 flex-col">
+            <div class="flex">
+                <img src="images/hanging.png" alt="Hanging Image" class="h-[700px] mt-8" />
+                <div class="flex gap-12">
+                    <div class="w-[50%]">
+                        <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-checklist
+                            data-key="work">
+                            <img src="images/work.png" alt="Work Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
+
+                            <div class="mt-8">
+                                <form class="flex justify-between" data-checklist-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                                            focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                                           hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+                        </div>
+                        <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
+                            data-key="home">
+                            <img src="images/house.png" alt="House Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
+
+                            <div class="mt-8">
+                                <form class="flex justify-between" data-checklist-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                                            focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                                           hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+                        </div>
+                        <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
+                            data-key="food">
+                            <img src="images/food.png" alt="Food Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
+
+                            <div class="mt-8">
+                                <form class="flex justify-between" data-checklist-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                                        focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                                   hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+
+                        </div>
+                    </div>
+                    <div class="w-[50%]">
+                        <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-bullets
+                            data-key="notes">
+                            <img src="images/notes.png" alt="House Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-16" />
+                            <div class="mt-8">
+                                <form class="flex gap-3 justify-between" data-bullets-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-bullets-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                         focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                                           hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- list-disc gives bullets; marker:text-main colors the bullets -->
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                        </div>
+                        <img src="images/bush.png" alt="Bush Image" class="mt-4" />
+                    </div>
+                </div>
+            </div>
+            <!-- PIC GOES HERE!-->
+        </section>
+
+    </div>
+
+
+    <script src="main.js" defer></script>
+</body>
+
+</html>
