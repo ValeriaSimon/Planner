@@ -1,7 +1,5 @@
-
+// middleware.js
 import { NextResponse } from 'next/server';
-
-export const runtime = 'edge'; // be explicit
 
 // Protect everything except Next internals & static assets
 export const config = {
@@ -13,7 +11,7 @@ export const config = {
 function decodeBasic(authHeader) {
   try {
     const [, b64] = authHeader.split(' ');
-    const decoded = atob(b64); // available in Edge
+    const decoded = atob(b64); // available in Edge runtime
     const i = decoded.indexOf(':');
     return [decoded.slice(0, i), decoded.slice(i + 1)];
   } catch {
@@ -35,9 +33,7 @@ export function middleware(req) {
   const auth = req.headers.get('authorization') || '';
   if (auth.startsWith('Basic ')) {
     const [u, p] = decodeBasic(auth);
-    if (u === USER && p === PASS) {
-      return NextResponse.next();
-    }
+    if (u === USER && p === PASS) return NextResponse.next();
   }
 
   return new NextResponse('Auth required', {
