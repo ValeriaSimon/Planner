@@ -5,6 +5,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="./output.css" rel="stylesheet" />
+    <style>
+        /* Hide the native calendar icon; we’ll show the FA icon instead */
+        [data-countdown].is-form input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+            opacity: 0;
+        }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Borel&family=Pacifico&display=swap" rel="stylesheet">
@@ -12,29 +18,87 @@
     <title id="page-title"></title>
 </head>
 
-<body class="bg-neutral w-[85%] mx-auto">
-    <nav class="flex gap-3 mt-2">
-        <a href="/today" class="underline text-white/80 hover:text-white" data-link="today">Today</a>
-        <span class="text-white/40">/</span>
-        <a href="/tomorrow" class="underline text-white/80 hover:text-white" data-link="tomorrow">Tomorrow</a>
-    </nav>
-
+<body data-day-offset="0" class="bg-neutral w-[85%] mx-auto">
     <header class="flex justify-between">
         <div class="flex flex-col items-center">
-            <h1 class="text-9xl text-nowrap font-main text-main underline py-4 text-shadow-lg text-shadow-black/20">
+            <h1 id="greeting"
+                class="text-9xl text-nowrap font-main text-main underline py-4 text-shadow-lg text-shadow-black/20">
                 Good morning!
             </h1>
-            <h2 class="text-3xl font-sec font-bold text-white text-right mr-14 py-3">
+            <h2 class="text-2xl font-sec font-bold text-white text-right mr-8 py-3">
                 Today is <span id="today"></span>
             </h2>
         </div>
         <img src="images/garland.png" alt="Morning Image" class="h-64 w-[50%] object-fill pt-10" />
     </header>
-    <button id="download-today"
-        class="mt-12 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
-        Download Today
-    </button>
+    <!-- Brown blocks section -->
+    <section class="flex gap-8 items-start">
+        <!-- Countdown card -->
+        <div class="bg-main p-8 rounded-lg relative">
+            <div data-countdown>
+                <!-- view mode -->
+                <div data-countdown-view class="hidden">
+                    <div class="flex items-start justify-between gap-3">
+                        <h3 data-countdown-title class="text-3xl font-main leading-loose text-white mb-2 pr-6 truncate"></h3>
 
+                        <!-- reset lives in the header, top-right (no absolute) -->
+                        <button type="button" data-countdown-reset class="p-2 shrink-0">
+                            <i class="fa-solid fa-rotate" style="color:#D9CBB3;"></i>
+                        </button>
+                    </div>
+
+                    <div class="mt-1 text-4xl font-main text-white">
+                        <span data-countdown-display class="inline-block min-w-[14ch]"
+                            style="font-variant-numeric: tabular-nums;">—</span>
+                    </div>
+
+                </div>
+
+                <!-- form mode -->
+                <div data-countdown-form class="flex flex-col gap-3">
+                    <div class="relative">
+                        <input id="cd-when" data-countdown-when type="datetime-local"
+                            class="px-3 py-2 pr-10 text-white font-sec focus:outline-none" />
+                        <button type="button" data-open-picker class="absolute right-2 top-1/2 -translate-y-1/2"
+                            aria-label="Open date picker">
+                            <i class="fa-regular fa-calendar" style="color:#D9CBB3;"></i>
+                        </button>
+                    </div>
+
+                    <div class="flex items-end gap-3">
+                        <div class="basis-3/4">
+                            <input id="cd-label" data-countdown-label type="text" aria-label="Countdown label"
+                                class="mt-1 leading-loose w-full border-b border-white px-3 py-2 focus:outline-none text-white font-sec"
+                                placeholder="Vacation, launch, etc." />
+                        </div>
+                        <div class="basis-[15%]">
+                            <button type="button" data-countdown-start
+                                class="w-full rounded-lg font-sec hover:bg-white text-white hover:text-neutral px-4 pt-3 pb-2 bg-neutral transition-colors">
+                                Set
+                            </button>
+                        </div>
+                        <div class="flex-1"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plan tomorrow button (no stretching) -->
+        <div class="flex flex-col">
+            <a href="./tomorrow.html"
+                class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
+                Plan tomorrow...
+            </a>
+            <div class="mt-6 ml-2">
+                <button id="download-today">
+                    <i class="fa-solid fa-file-arrow-down" style="color:white;"></i>
+                    <span class="sr-only">Download today</span>
+                </button>
+            </div>
+        </div>
+
+
+    </section>
 
     <div class="flex justify-between">
         <!-- LEFT COLUMN ------------------------------------------------------->
@@ -276,7 +340,8 @@
                     </div>
                 </div>
             </div>
-            <!-- PIC GOES HERE!-->
+
+
         </section>
 
     </div>
