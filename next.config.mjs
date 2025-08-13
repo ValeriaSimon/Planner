@@ -1,7 +1,9 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+export default {
   async rewrites() {
-    return [{ source: '/', destination: '/index.html' }];
+    return [
+      { source: '/',         destination: '/index.html' },
+      { source: '/today',    destination: '/index.html' },
+      { source: '/tomorrow', destination: '/index.html' },
+    ];
   },
 };
-export default nextConfig;
