@@ -39,7 +39,8 @@
                 <!-- view mode -->
                 <div data-countdown-view class="hidden">
                     <div class="flex items-start justify-between gap-3">
-                        <h3 data-countdown-title class="text-3xl font-main leading-loose text-white mb-2 pr-6 truncate"></h3>
+                        <h3 data-countdown-title class="text-3xl font-main leading-loose text-white mb-2 pr-6 truncate">
+                        </h3>
 
                         <!-- reset lives in the header, top-right (no absolute) -->
                         <button type="button" data-countdown-reset class="p-2 shrink-0">
@@ -84,12 +85,16 @@
         </div>
 
         <!-- Plan tomorrow button (no stretching) -->
-        <div class="flex flex-col">
+        <div class="flex gap-4 flex-col">
             <a href="./tomorrow.html"
                 class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
                 Plan tomorrow...
             </a>
-            <div class="mt-6 ml-2">
+            <button type="button" id="endday"
+                class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
+                End day!
+            </button>
+            <div class="ml-2">
                 <button id="download-today">
                     <i class="fa-solid fa-file-arrow-down" style="color:white;"></i>
                     <span class="sr-only">Download today</span>
@@ -105,7 +110,7 @@
         <section class="py-32 flex flex-col gap-24 basis-1/4">
 
             <!-- CARD: Morning -->
-            <div class="bg-white p-8 outline-4 outline-main rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+            <div class="bg-white p-8 outline-4 outline-[#FFBA3A] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
                 data-checklist data-start="10" data-end="14" data-key="morning">
                 <img src="images/am.png" alt="Morning Image"
                     class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-20" />
@@ -151,7 +156,7 @@
             </div>
 
             <!-- CARD: Daytime -->
-            <div class="bg-white p-8 outline-4 outline-[#FECA6A] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+            <div class="bg-white p-8 outline-4 outline-[#FF851B] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
                 data-checklist data-start="14" data-end="18" data-key="daytime">
                 <img src="images/mid.png" alt="Day Image"
                     class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
@@ -247,7 +252,7 @@
         <section class="py-32 flex-col">
             <div class="flex">
                 <img src="images/hanging.png" alt="Hanging Image" class="h-[700px] mt-8" />
-                <div class="flex gap-12">
+                <div class="flex gap-20">
                     <div class="w-[50%]">
                         <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-checklist
                             data-key="work">
@@ -291,9 +296,55 @@
 
                             <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
                         </div>
-                        <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
+                        <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-bullets
                             data-key="food">
                             <img src="images/food.png" alt="Food Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
+
+                            <div class="mt-8">
+                                <form class="flex justify-between" data-bullets-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-bullets-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                      focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                     hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- list-disc gives bullets; marker:text-main colors the bullets -->
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                        </div>
+
+                    </div>
+                    <div class="w-[50%]">
+                        <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-bullets
+                            data-key="notes">
+                            <img src="images/notes.png" alt="House Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2" />
+                            <div class="mt-8">
+                                <form class="flex gap-3 justify-between" data-bullets-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-bullets-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                         focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                                           hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- list-disc gives bullets; marker:text-main colors the bullets -->
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                        </div>
+                        <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
+                            data-key="shopping">
+                            <img src="images/cart.png" alt="Food Image"
                                 class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
 
                             <div class="mt-8">
@@ -312,29 +363,6 @@
 
                             <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
 
-                        </div>
-                    </div>
-                    <div class="w-[50%]">
-                        <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-bullets
-                            data-key="notes">
-                            <img src="images/notes.png" alt="House Image"
-                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-16" />
-                            <div class="mt-8">
-                                <form class="flex gap-3 justify-between" data-bullets-form>
-                                    <div class="flex flex-col">
-                                        <input type="text" data-bullets-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
-                         focus:outline-none caret-accents" autocomplete="off" />
-                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
-                                    </div>
-                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
-                                           hover:bg-neutral transition-colors duration-300">
-                                        Add
-                                    </button>
-                                </form>
-                            </div>
-
-                            <!-- list-disc gives bullets; marker:text-main colors the bullets -->
-                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
                         </div>
                         <img src="images/bush.png" alt="Bush Image" class="mt-4" />
                     </div>

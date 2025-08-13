@@ -246,7 +246,7 @@
         <section class="py-32 flex-col">
             <div class="flex">
                 <img src="images/hanging.png" alt="Hanging Image" class="h-[700px] mt-8" />
-                <div class="flex gap-12">
+                <div class="flex gap-20">
                     <div class="w-[50%]">
                         <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-checklist
                             data-key="work">
@@ -334,6 +334,28 @@
 
                             <!-- list-disc gives bullets; marker:text-main colors the bullets -->
                             <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                        </div>
+                        <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
+                            data-key="shopping">
+                            <img src="images/cart.png" alt="Food Image"
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
+
+                            <div class="mt-8">
+                                <form class="flex justify-between" data-checklist-form>
+                                    <div class="flex flex-col">
+                                        <input type="text" data-checklist-input class="text-accents leading-loose font-bold tracking-wide text-xl font-sec
+                                        focus:outline-none caret-accents" autocomplete="off" />
+                                        <hr class="-mt-3 border-b-3 border-main rounded-lg" />
+                                    </div>
+                                    <button type="submit" class="shadow-2xl rounded-lg bg-main px-4 py-2 font-medium text-white
+                                   hover:bg-neutral transition-colors duration-300">
+                                        Add
+                                    </button>
+                                </form>
+                            </div>
+
+                            <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
+
                         </div>
                         <img src="images/bush.png" alt="Bush Image" class="mt-4" />
                     </div>
