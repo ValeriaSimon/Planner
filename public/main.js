@@ -196,6 +196,107 @@ function getCardBoundary(key, which) {
   return Number.isFinite(v) ? v : null;
 }
 
+// Title-case helper
+function capWords(s) {
+  return String(s).replace(/(^|[\s\-\/])([^\s\-\/])/g, (m, sep, ch) => sep + ch.toLocaleUpperCase());
+}
+
+
+/* --- time-card collapse helpers --- */
+const TIME_KEYS = ["morning", "daytime", "evening"];
+const DEFAULT_END = { morning: 14, daytime: 18, evening: 22 };
+const COLLAPSE_SCALE = 0.6;
+
+
+function cardEndHour(key) {
+  const v = getCardBoundary(key, "end");
+  return Number.isFinite(v) ? v : DEFAULT_END[key] ?? 24;
+}
+
+function renderCardFromStorage(key) {
+  const card = document.querySelector(`[data-checklist][data-key="${key}"]`);
+  if (!card) return;
+  const list = card.querySelector("[data-checklist-list]");
+  if (!list) return;
+  list.innerHTML = "";
+  const dayData = loadJSON(dayKey(), {});
+  const entry = dayData[key];
+  if (entry?.items?.length) {
+    const add = card.__addChecklistItem;
+    entry.items.forEach((it) => add && add(it.text, !!it.done, true));
+  }
+  const smokeCb = card.querySelector('[data-smoke] input[type="checkbox"]');
+  if (smokeCb) {
+    smokeCb.checked = !!entry?.smoke;
+    smokeCb.dispatchEvent(new Event("change"));
+  }
+}
+
+function applyCollapsedUI(key, collapsed) {
+  const card = document.querySelector(`[data-checklist][data-key="${key}"]`);
+  if (!card) return;
+  const list = card.querySelector("[data-checklist-list]");
+  const form = card.querySelector("[data-checklist-form]");
+  const smoke = card.querySelector("[data-smoke]");
+
+  if (collapsed) {
+    list?.classList.add("hidden");
+    form?.classList.add("hidden");
+    smoke?.classList.add("hidden");
+    card.setAttribute("data-collapsed", "1");
+    // visual collapse: keep colors, just scale
+    card.style.transformOrigin = "top left";
+    card.style.transform = `scale(${COLLAPSE_SCALE})`;
+    card.style.transition = "transform 200ms ease";
+  } else {
+    list?.classList.remove("hidden");
+    form?.classList.remove("hidden");
+    smoke?.classList.remove("hidden");
+    card.removeAttribute("data-collapsed");
+    card.style.transform = "";
+  }
+}
+
+
+
+function refreshTomorrowPreviewAfterTodayChange() {
+  const todayData = loadJSON(dayKey(0), {}) || {};
+  const tKey = dayKey(1);
+  const tomorrowData = loadJSON(tKey, {}) || {};
+  const prevCarriedMeta = tomorrowData.__carried || {};
+  const newCarriedMeta = {};
+  let changed = false;
+
+  TIME_KEYS.forEach((key) => {
+    const entry = todayData[key];
+    if (!entry || entry.type !== "checklist" || !Array.isArray(entry.items)) return;
+
+    const carryMap = new Map();
+    entry.items.forEach((it) => { if (!it.done) { const n = _norm(it.text); if (n) carryMap.set(n, it.text); } });
+    newCarriedMeta[key] = Array.from(carryMap.keys());
+
+    const existing = (tomorrowData[key] && Array.isArray(tomorrowData[key].items)) ? tomorrowData[key].items : [];
+    const prevCarriedSet = new Set((prevCarriedMeta[key] || []).map(_norm));
+    const native = existing.filter((it) => !prevCarriedSet.has(_norm(it.text)));
+
+    const nativeSet = new Set(native.map((it) => _norm(it.text)));
+    const newCarriedItems = [];
+    carryMap.forEach((orig, norm) => { if (!nativeSet.has(norm)) newCarriedItems.push({ text: orig, done: false }); });
+
+    const nextItems = [...newCarriedItems, ...native];
+    if (JSON.stringify(existing) !== JSON.stringify(nextItems)) {
+      changed = true;
+      if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
+      tomorrowData[key].items = nextItems;
+    }
+  });
+
+  if (changed || JSON.stringify(tomorrowData.__carried || {}) !== JSON.stringify(newCarriedMeta)) {
+    tomorrowData.__carried = newCarriedMeta;
+    saveJSON(tKey, tomorrowData);
+  }
+}
+
 function getSmokesCountFromDOM() {
   const el = document.getElementById("smokescount");
   const n = parseInt(el?.textContent || "0", 10);
@@ -262,8 +363,13 @@ function wireChecklist(root) {
     input.value = "";
   });
 
+  input.addEventListener("blur", () => { input.value = capWords(input.value); });
+
   function addItemsFrom(text) {
-    text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).forEach((t) => addItem(t));
+    text.split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((t) => addItem(capWords(t)));
   }
 
   function addItem(labelText, done = false, restoring = false) {
@@ -354,11 +460,10 @@ function wireBullets(root) {
   }
 
   function addItemsFrom(text) {
-    text
-      .split(/[\n,;]+/)
+    text.split(/[\n,;]+/)
       .map((s) => s.trim())
       .filter(Boolean)
-      .forEach((t) => addItem(t));
+      .forEach((t) => addItem(capWords(t)));
   }
 
   function addItem(text, restoring = false) {
@@ -401,6 +506,8 @@ function wireBullets(root) {
     input.value = "";
     input.focus();
   });
+
+  input.addEventListener("blur", () => { input.value = capWords(input.value); });
 
   root.__addBulletItem = (text, restoring = false) => addItem(text, restoring);
 }
@@ -609,6 +716,43 @@ function wireCountdown(root) {
   });
 }
 
+function collapsePastTimeCards() {
+  if (DAY_OFFSET !== 0) return; // only on Today
+  const key = dayKey(0);
+  const data = loadJSON(key, {}) || {};
+  data.__collapsed = data.__collapsed || {};
+  let moved = false;
+
+  for (let i = 0; i < TIME_KEYS.length; i++) {
+    const fromKey = TIME_KEYS[i];
+    const toKey = TIME_KEYS[i + 1]; // undefined for evening
+    const shouldCollapse = new Date().getHours() >= cardEndHour(fromKey);
+
+    applyCollapsedUI(fromKey, shouldCollapse);
+
+    if (shouldCollapse && !data.__collapsed[fromKey] && toKey) {
+      const from = (data[fromKey]?.items) ? data[fromKey] : (data[fromKey] = { type: "checklist", items: [], smoke: false });
+      const to = (data[toKey]?.items) ? data[toKey] : (data[toKey] = { type: "checklist", items: [], smoke: false });
+
+      const carry = (from.items || []).filter((it) => !it.done);
+      const keep = (from.items || []).filter((it) => it.done);
+
+      to.items = [...carry, ...(to.items || [])]; // prepend
+      from.items = keep;
+
+      data.__collapsed[fromKey] = true;
+      moved = true;
+    }
+  }
+
+  if (moved) {
+    saveJSON(key, data);
+    TIME_KEYS.forEach(renderCardFromStorage);       // re-render affected cards
+    refreshTomorrowPreviewAfterTodayChange();       // keep tomorrow in sync
+  }
+}
+
+
 /* -------- Boot -------- */
 document.addEventListener("DOMContentLoaded", () => {
   setHeaderAndTitle();
@@ -620,6 +764,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   prefillTomorrowFromToday();
   restoreAll();
+  collapsePastTimeCards();
+  setInterval(collapsePastTimeCards, 5 * 60 * 1000); // every 5 minutes
+
 
   if (DAY_OFFSET === 0) ensureEmptyDay(1);
   highlightCurrentBlock();
