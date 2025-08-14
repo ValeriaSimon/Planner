@@ -773,10 +773,10 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(highlightCurrentBlock, 5 * 60 * 1000);
 
   // Download today (DOM snapshot)
-  document.getElementById("download-today")?.addEventListener("click", async () => {
+  document.getElementById("download-today")?.addEventListener("click", () => {
     const ds = ymd(getPlannerDate(DAY_OFFSET));
     const dayObj = collectChecklistsFromDOM();
-    dayObj.__smokes = getSmokesCountFromDOM();   // <- add
+    dayObj.__smokes = getSmokesCountFromDOM();
     const payload = {
       version: 2,
       date: ds,
@@ -784,8 +784,9 @@ document.addEventListener("DOMContentLoaded", () => {
       bullets: collectBulletsFromDOM(),
       notes: loadJSON(GLOBAL_NOTES_KEY, []),
     };
-    await downloadJSON(`${ds}-planner.json`, payload);
+    saveViaHref(`${ds}-planner.json`, payload); // no FS API, just blob download
   });
+
 
 
   // Restore from JSON (opens remembered folder if supported)
