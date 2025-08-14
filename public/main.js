@@ -458,61 +458,47 @@ function saveJSON(key, value) {
 const _norm = (s) => (s || "").trim().toLowerCase();
 
 function prefillTomorrowFromToday() {
-  if (DAY_OFFSET !== 1) return; // only when viewing "tomorrow"
+  // Only when viewing "tomorrow"
+  if (typeof DAY_OFFSET !== "undefined" && DAY_OFFSET !== 1) return;
 
-  const todayData = loadJSON(dayKey(0), {}) || {};
-  const tomorrowKey = dayKey(1);
-  const tomorrowData = loadJSON(tomorrowKey, {}) || {};
+  const todayData = (typeof loadJSON === "function" ? loadJSON(dayKey(0), {}) : {}) || {};
+  const tomorrowKey = typeof dayKey === "function" ? dayKey(1) : "";
+  const tomorrowData = (typeof loadJSON === "function" ? loadJSON(tomorrowKey, {}) : {}) || {};
 
-  const prevCarriedMeta = tomorrowData.__carried || {};
-  const newCarriedMeta = {};
   let changed = false;
 
   Object.keys(todayData).forEach((key) => {
     const entry = todayData[key];
     if (!entry || entry.type !== "checklist" || !Array.isArray(entry.items)) return;
 
-    // Map normalized text -> original text for today's *unchecked* items
-    const carryMap = new Map();
-    entry.items.forEach((it) => {
-      if (!it.done) {
-        const norm = _norm(it.text);
-        if (norm) carryMap.set(norm, it.text);
-      }
-    });
-    newCarriedMeta[key] = Array.from(carryMap.keys());
+    // Unchecked items from today
+    const carry = entry.items
+      .filter((it) => !it.done)
+      .map((it) => ({ text: (it.text || "").trim(), done: false }));
 
-    const existing = (tomorrowData[key] && Array.isArray(tomorrowData[key].items))
-      ? tomorrowData[key].items
-      : [];
+    if (!tomorrowData[key]) {
+      tomorrowData[key] = { type: "checklist", items: [], smoke: false };
+    }
 
-    // Items that were previously carried (by text), so we can drop/refresh them
-    const prevCarriedSet = new Set((prevCarriedMeta[key] || []).map(_norm));
+    // Build a set of normalized texts already present tomorrow
+    const existing = Array.isArray(tomorrowData[key].items) ? tomorrowData[key].items : [];
+    const norm = (s) => (s || "").trim().toLowerCase();
+    const existingSet = new Set(existing.map((it) => norm(it.text)));
 
-    // Keep only items that were *not* previously carried (i.e., native tomorrow tasks)
-    const native = existing.filter((it) => !prevCarriedSet.has(_norm(it.text)));
-
-    // Avoid duplicates vs natives
-    const nativeSet = new Set(native.map((it) => _norm(it.text)));
-    const newCarriedItems = [];
-    carryMap.forEach((orig, norm) => {
-      if (!nativeSet.has(norm)) newCarriedItems.push({ text: orig, done: false });
-    });
-
-    const nextItems = [...newCarriedItems, ...native];
-
-    if (JSON.stringify(existing) !== JSON.stringify(nextItems)) {
+    // Add only the missing carry-overs to the FRONT (never remove anything)
+    const toAdd = carry.filter((it) => !existingSet.has(norm(it.text)));
+    if (toAdd.length) {
+      tomorrowData[key].items = [...toAdd, ...existing];
       changed = true;
-      if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
-      tomorrowData[key].items = nextItems;
     }
   });
 
-  if (changed || JSON.stringify(tomorrowData.__carried || {}) !== JSON.stringify(newCarriedMeta)) {
-    tomorrowData.__carried = newCarriedMeta; // record which texts are carry-overs
+  if (changed && typeof saveJSON === "function") {
+    // No __carried bookkeeping here—prevents accidental pruning on view switches
     saveJSON(tomorrowKey, tomorrowData);
   }
 }
+
 
 
 // DOM -> objects
