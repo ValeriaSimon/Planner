@@ -193,13 +193,6 @@ function restoreAll() {
         smokeCb.dispatchEvent(new Event("change"));
       }
     });
-
-  // global notes shared across pages
-  const notes = loadJSON(GLOBAL_NOTES_KEY, []);
-  document.querySelectorAll("[data-bullets][data-key]").forEach((card) => {
-    const add = card.__addBulletItem;
-    notes.forEach((it) => add && add(it.text, true));
-  });
 }
 
 /** Checklist card */
