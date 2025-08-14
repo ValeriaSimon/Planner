@@ -1,10 +1,16 @@
 @import "tailwindcss";
+
 @theme {
   --color-neutral: #1C2317;
   --color-main: #99582a;
   --color-maind: #522500;
   --color-accents: #3A5F0B;
   --color-white: #D9CBB3;
-  --font-main: "Pacifico", sans-serif; 
+  --font-main: "Pacifico", sans-serif;
   --font-sec: "Borel", sans-serif;
+}
+
+/* Hide the native calendar icon; we’ll show the FA icon instead */
+[data-countdown].is-form input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
 }

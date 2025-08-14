@@ -16,9 +16,9 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 const weekday3 = (i) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][i];
-const daysLong = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-const monthsShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const monthsLong = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const daysLong = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const monthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthsLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const ord = (n) => { const v = n % 100; if (v >= 11 && v <= 13) return "th"; switch (n % 10) { case 1: return "st"; case 2: return "nd"; case 3: return "rd"; default: return "th"; } };
 
 /* -------- Storage model (matches your schema) -------- */
@@ -110,7 +110,7 @@ async function ensureDirHandle() {
       const req = await handle.requestPermission({ mode: "readwrite" });
       if (req === "granted") return handle;
     }
-  } catch {}
+  } catch { }
   try {
     handle = await window.showDirectoryPicker();
     const perm = await handle.requestPermission({ mode: "readwrite" });
@@ -118,7 +118,7 @@ async function ensureDirHandle() {
       await idb.put(FS_KEYS.DIR, handle);
       return handle;
     }
-  } catch {}
+  } catch { }
   return null;
 }
 async function writeJSONToDir(dirHandle, filename, obj) {
@@ -155,7 +155,7 @@ async function pickFileFromRememberedDir() {
   };
   const dir = await idb.get(FS_KEYS.DIR);
   if (dir && window.showOpenFilePicker) {
-    try { opts.startIn = dir; } catch {}
+    try { opts.startIn = dir; } catch { }
   }
   if (window.showOpenFilePicker) {
     const [h] = await window.showOpenFilePicker(opts);
@@ -230,7 +230,7 @@ function highlightCurrentBlock() {
     const start = Number(card.dataset.start);
     const end = Number(card.dataset.end);
     return hr >= start && hr < end;
-    });
+  });
   if (active) active.classList.add("scale-105", "z-10", "shadow-xl");
 }
 
@@ -290,7 +290,7 @@ function wireChecklist(root) {
       if (!suppressSave) snapshotDay();
     });
 
-    const del = el("button","rounded-md px-2 py-1 text-red-400 hover:text-white hover:bg-neutral transition-colors opacity-0 group-hover:opacity-100","✕");
+    const del = el("button", "rounded-md px-2 py-1 text-red-400 hover:text-white hover:bg-neutral transition-colors opacity-0 group-hover:opacity-100", "✕");
     del.type = "button";
     del.title = "Remove";
     del.addEventListener("click", () => { li.remove(); if (!suppressSave) snapshotDay(); });
@@ -321,10 +321,21 @@ function wireBullets(root) {
   const key = root.dataset.key || "notes";
   if (!form || !input || !list) return;
 
-  function read() { return loadJSON(bulletsStorageKeyFor(key), []); }
-  function write(items) { saveJSON(bulletsStorageKeyFor(key), items); }
+  // tolerant read/write
+  function readItems() {
+    const v = loadJSON(bulletsStorageKeyFor(key), []);
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === "object" && Array.isArray(v.items)) return v.items; // legacy {type:'bullets', items:[]}
+    return [];
+  }
+  function writeItems(items) {
+    // always persist as a plain array
+    saveJSON(bulletsStorageKeyFor(key), items);
+  }
   function currentItems() {
-    return [...list.querySelectorAll('[data-role="text"]')].map((el) => ({ text: (el.textContent || "").trim() }));
+    return [...list.querySelectorAll('[data-role="text"]')].map((el) => ({
+      text: (el.textContent || "").trim(),
+    }));
   }
 
   function addItemsFrom(text) {
@@ -338,28 +349,47 @@ function wireBullets(root) {
   function addItem(text, restoring = false) {
     const li = el("li", "mt-3");
     const row = el("div", "flex items-center gap-3");
+
     const txt = el("span", "text-accents font-bold tracking-wide text-xl font-sec");
     txt.textContent = text;
     txt.setAttribute("data-role", "text");
-    const del = el("button","ml-auto inline-flex items-center justify-center size-6 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors","✕");
+
+    const del = el(
+      "button",
+      "ml-auto inline-flex items-center justify-center size-6 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors",
+      "✕"
+    );
     del.type = "button";
     del.title = "Remove";
     del.setAttribute("aria-label", `Remove "${text}"`);
-    del.addEventListener("click", () => { li.remove(); write(currentItems()); });
+    del.addEventListener("click", () => {
+      li.remove();
+      writeItems(currentItems());
+    });
+
     row.append(txt, del);
     li.appendChild(row);
     list.appendChild(li);
-    if (!restoring) write(currentItems());
+
+    if (!restoring) writeItems(currentItems());
   }
 
   // init
   list.innerHTML = "";
-  read().forEach((it) => addItem(it.text, true));
+  readItems().forEach((it) => addItem(typeof it === "string" ? it : it.text, true));
 
-  form.addEventListener("submit", (e) => { e.preventDefault(); addItemsFrom(input.value); input.value = ""; });
+  // submit
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    addItemsFrom(input.value);
+    input.value = "";
+    input.focus();
+  });
 
   root.__addBulletItem = (text, restoring = false) => addItem(text, restoring);
 }
+
 
 /* -------- Smoke toggle -------- */
 function wireSmoke(container) {
@@ -512,7 +542,7 @@ function wireCountdown(root) {
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function formatDuration(ms) { let s = Math.max(0, Math.floor(ms / 1000)); const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60; return (d > 0 ? `${d}d ` : '') + `${pad(h)}:${pad(m)}:${pad(s)}`; }
-  function toLocalDatetimeValue(d) { return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+  function toLocalDatetimeValue(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 
   function update() {
     const saved = readSaved();
