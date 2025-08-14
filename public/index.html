@@ -89,16 +89,22 @@
                 class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
                 End day!
             </button>
-            <div class="ml-2 flex gap-3">
-                <button id="download-today">
+            <div class="flex items-center gap-3 mt-3">
+                <div class="text-white text-lg font-sec bg-main pt-3 px-4 rounded-lg flex gap-4">
+                    <span id="smokescount">0</span> <span id="smokescount-plus">+</span>
+                </div>
+
+                <button id="download-today" class="inline-flex items-center justify-center">
                     <i class="fa-solid fa-file-arrow-down" style="color:white;"></i>
                     <span class="sr-only">Download today</span>
                 </button>
-                <button id="restore">
+
+                <button id="restore" class="inline-flex items-center justify-center">
                     <i class="fa-solid fa-file-arrow-up" style="color:white;"></i>
                     <span class="sr-only">Restore</span>
                 </button>
             </div>
+
         </div>
 
 

@@ -196,6 +196,17 @@ function getCardBoundary(key, which) {
   return Number.isFinite(v) ? v : null;
 }
 
+function getSmokesCountFromDOM() {
+  const el = document.getElementById("smokescount");
+  const n = parseInt(el?.textContent || "0", 10);
+  return Number.isFinite(n) ? n : 0;
+}
+function setSmokesCount(n) {
+  const el = document.getElementById("smokescount");
+  if (el) el.textContent = String(n);
+}
+
+
 /* -------- Greeting + titles -------- */
 function updateGreeting() {
   const h1 = document.getElementById("greeting") || document.querySelector("h1");
@@ -213,11 +224,11 @@ function updateGreeting() {
 function setHeaderAndTitle() {
   const d = getPlannerDate(DAY_OFFSET);
   document.title = `${weekday3(d.getDay())} ${pad2(d.getDate())}-${monthsShort[d.getMonth()]}`;
-  const h2 = document.querySelector("header h2");
-  const label = DAY_OFFSET === 0 ? "Today" : DAY_OFFSET === 1 ? "Tomorrow" : `In ${DAY_OFFSET} days`;
-  if (h2) h2.innerHTML = `${label} is <span id="today"></span>`;
   const todayEl = document.getElementById("today");
-  if (todayEl) todayEl.textContent = `${daysLong[d.getDay()]}, ${d.getDate()}${ord(d.getDate())} of ${monthsLong[d.getMonth()]}`;
+  if (todayEl) {
+    todayEl.textContent =
+      `${daysLong[d.getDay()]}, ${d.getDate()}${ord(d.getDate())} of ${monthsLong[d.getMonth()]}`;
+  }
 }
 
 /* -------- Highlight current block (today only) -------- */
@@ -241,6 +252,7 @@ function wireChecklist(root) {
   const list = root.querySelector("[data-checklist-list]");
   if (!form || !input || !list) return;
 
+  const cardKey = root.dataset.key || "card";     // <-- scope
   let id = 0;
   let suppressSave = false;
 
@@ -251,15 +263,11 @@ function wireChecklist(root) {
   });
 
   function addItemsFrom(text) {
-    text
-      .split(/[\n,;]+/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .forEach((t) => addItem(t));
+    text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).forEach((t) => addItem(t));
   }
 
   function addItem(labelText, done = false, restoring = false) {
-    const itemId = `item-${Date.now()}-${id++}`;
+    const itemId = `cb-${cardKey}-${Date.now()}-${id++}`;  // <-- unique per card
     const li = el("li", "flex items-center gap-3 py-3 px-3 group");
 
     const row = el("label", "flex items-center gap-3 cursor-pointer w-full select-none");
@@ -312,6 +320,13 @@ function wireChecklist(root) {
   const smoke = root.querySelector("[data-smoke]");
   if (smoke) wireSmoke(smoke);
 }
+
+const smokescount = document.getElementById("smokescount");
+const smokescountPlus = document.getElementById("smokescount-plus");
+smokescountPlus?.addEventListener("click", () => {
+  setSmokesCount(getSmokesCountFromDOM() + 1);
+  snapshotDay(); // persist with the day
+});
 
 /* -------- Bullets (global Notes vs day-scoped Food, etc.) -------- */
 function wireBullets(root) {
@@ -453,6 +468,8 @@ function prefillTomorrowFromToday() {
 /* -------- Restore current page from storage to DOM -------- */
 function restoreAll() {
   const dayData = loadJSON(dayKey(), {});
+  const sc = Number(dayData.__smokes);
+  if (Number.isFinite(sc)) setSmokesCount(sc);
   document.querySelectorAll("[data-checklist][data-key]").forEach((card) => {
     const entry = dayData[card.dataset.key];
     if (entry?.items?.length) {
@@ -499,7 +516,8 @@ function snapshotDay() {
   const key = dayKey();
   const prev = loadJSON(key, {}) || {};
   const next = collectChecklistsFromDOM();
-  if (prev.__carried) next.__carried = prev.__carried; // preserve metadata
+  next.__smokes = getSmokesCountFromDOM();     // <- add counter
+  if (prev.__carried) next.__carried = prev.__carried;
   saveJSON(key, next);
 }
 
@@ -610,15 +628,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Download today (DOM snapshot)
   document.getElementById("download-today")?.addEventListener("click", async () => {
     const ds = ymd(getPlannerDate(DAY_OFFSET));
+    const dayObj = collectChecklistsFromDOM();
+    dayObj.__smokes = getSmokesCountFromDOM();   // <- add
     const payload = {
       version: 2,
       date: ds,
-      day: collectChecklistsFromDOM(),
+      day: dayObj,
       bullets: collectBulletsFromDOM(),
       notes: loadJSON(GLOBAL_NOTES_KEY, []),
     };
     await downloadJSON(`${ds}-planner.json`, payload);
   });
+
 
   // Restore from JSON (opens remembered folder if supported)
   document.getElementById("restore")?.addEventListener("click", async () => {
@@ -681,7 +702,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // Build downloads from DOM snapshot to capture unsaved edits
     const dsToday = ymd(getPlannerDate(0));
     const dsTomorrow = ymd(getPlannerDate(1));
-    const payloadToday = { version: 2, date: dsToday, day: collectChecklistsFromDOM(), bullets: collectBulletsFromDOM(), notes: loadJSON(GLOBAL_NOTES_KEY, []) };
+    const dayToday = collectChecklistsFromDOM();
+    dayToday.__smokes = getSmokesCountFromDOM();
+    const payloadToday = {
+      version: 2,
+      date: dsToday,
+      day: dayToday,
+      bullets: collectBulletsFromDOM(),
+      notes: loadJSON(GLOBAL_NOTES_KEY, []),
+    };
     // Tomorrow payload from storage (no DOM yet)
     const tomorrowBullets = {}; // day-scoped bullets (e.g., food)
     Object.keys(localStorage).forEach((k) => {
