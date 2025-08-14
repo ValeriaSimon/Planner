@@ -386,6 +386,9 @@
   .flex-shrink {
     flex-shrink: 1;
   }
+  .shrink {
+    flex-shrink: 1;
+  }
   .shrink-0 {
     flex-shrink: 0;
   }
@@ -446,9 +449,6 @@
   }
   .list-disc {
     list-style-type: disc;
-  }
-  .grid-cols-\[75\%_15\%_auto\] {
-    grid-template-columns: 75% 15% auto;
   }
   .grid-rows-2 {
     grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -554,12 +554,6 @@
   }
   .border-white {
     border-color: var(--color-white);
-  }
-  .border-white\/30 {
-    border-color: color-mix(in srgb, #D9CBB3 30%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      border-color: color-mix(in oklab, var(--color-white) 30%, transparent);
-    }
   }
   .bg-main {
     background-color: var(--color-main);
@@ -712,12 +706,6 @@
   .text-neutral {
     color: var(--color-neutral);
   }
-  .text-neutral\/70 {
-    color: color-mix(in srgb, #1C2317 70%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      color: color-mix(in oklab, var(--color-neutral) 70%, transparent);
-    }
-  }
   .text-red-400 {
     color: var(--color-red-400);
   }
@@ -741,6 +729,9 @@
   }
   .caret-accents {
     caret-color: var(--color-accents);
+  }
+  .opacity-0 {
+    opacity: 0%;
   }
   .shadow-2xl {
     --tw-shadow: 0 25px 50px -12px var(--tw-shadow-color, rgb(0 0 0 / 0.25));
@@ -830,6 +821,13 @@
   .text-shadow-lg {
     text-shadow: 0px 1px 2px var(--tw-text-shadow-color, rgb(0 0 0 / 0.1)), 0px 3px 2px var(--tw-text-shadow-color, rgb(0 0 0 / 0.1)), 0px 4px 8px var(--tw-text-shadow-color, rgb(0 0 0 / 0.1));
   }
+  .group-hover\:opacity-100 {
+    &:is(:where(.group):hover *) {
+      @media (hover: hover) {
+        opacity: 100%;
+      }
+    }
+  }
   .marker\:text-main {
     & *::marker {
       color: var(--color-main);
@@ -844,27 +842,6 @@
       color: var(--color-main);
     }
   }
-  .selection\:bg-white\/25 {
-    & *::selection {
-      background-color: color-mix(in srgb, #D9CBB3 25%, transparent);
-      @supports (color: color-mix(in lab, red, red)) {
-        background-color: color-mix(in oklab, var(--color-white) 25%, transparent);
-      }
-    }
-    &::selection {
-      background-color: color-mix(in srgb, #D9CBB3 25%, transparent);
-      @supports (color: color-mix(in lab, red, red)) {
-        background-color: color-mix(in oklab, var(--color-white) 25%, transparent);
-      }
-    }
-  }
-  .hover\:bg-main {
-    &:hover {
-      @media (hover: hover) {
-        background-color: var(--color-main);
-      }
-    }
-  }
   .hover\:bg-neutral {
     &:hover {
       @media (hover: hover) {
@@ -876,16 +853,6 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--color-white);
-      }
-    }
-  }
-  .hover\:bg-white\/10 {
-    &:hover {
-      @media (hover: hover) {
-        background-color: color-mix(in srgb, #D9CBB3 10%, transparent);
-        @supports (color: color-mix(in lab, red, red)) {
-          background-color: color-mix(in oklab, var(--color-white) 10%, transparent);
-        }
       }
     }
   }
