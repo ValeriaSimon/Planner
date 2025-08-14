@@ -84,9 +84,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
   if (todayEl) {
-    todayEl.textContent = `${days[d.getDay()]}, ${d.getDate()}${ord(
-      d.getDate()
-    )} of ${months[d.getMonth()]}`;
+    todayEl.textContent = `${days[d.getDay()]}, ${d.getDate()}${ord(d.getDate())} of ${months[d.getMonth()]}`;
   }
 
   updateGreeting();
@@ -96,7 +94,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-bullets]").forEach(wireBullets);
   document.querySelectorAll("[data-countdown]").forEach(wireCountdown);
 
-
   // Ensure tomorrow view shows today's unfinished items
   prefillTomorrowFromToday();
 
@@ -104,7 +101,7 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreAll();
 
   // ---- "End day!" manual rollover ----
-  document.getElementById("endday")?.addEventListener("click", () => {
+  document.getElementById("endday")?.addEventListener("click", async () => {
     // Keys relative to the current base day (before we advance it)
     const todayKey = dayKey(0);
     const tomorrowKey = dayKey(1);
@@ -116,9 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const todayData = loadJSON(todayKey, {}) || {};
     const tomorrowData = loadJSON(tomorrowKey, {}) || {};
 
-    // ✨ Track which items we carried over (by normalized text)
     const carriedMeta = {};
-
     Object.keys(todayData || {}).forEach((key) => {
       const entry = todayData[key];
       if (entry?.type === "checklist" && Array.isArray(entry.items)) {
@@ -131,22 +126,51 @@ document.addEventListener("DOMContentLoaded", () => {
         // Prepend carry-overs so they appear first tomorrow
         tomorrowData[key].items = [...carry, ...(tomorrowData[key].items || [])];
 
-        // Record what we carried for pruning later in the tomorrow view
         if (carry.length) {
-          carriedMeta[key] = carry
-            .map((it) => _norm(it.text))
-            .filter(Boolean);
+          carriedMeta[key] = carry.map((it) => _norm(it.text)).filter(Boolean);
         }
       }
     });
 
-    // Save the metadata so the tomorrow page can prune carried items
-    // if you later check them off "today".
+    // Mark metadata for pruning logic
     tomorrowData.__carried = carriedMeta;
 
+    // Persist tomorrow
     saveJSON(tomorrowKey, tomorrowData);
 
-    // Advance the base day by one and reload the page
+    // ---- Build backup payloads ----
+    const todayPayload = {
+      day: collectChecklistsFromDOM(),
+      bullets: collectBulletsFromDOM(),
+      notes: loadJSON(GLOBAL_NOTES_KEY, []),
+    };
+
+    // Load bullets for tomorrow from storage
+    const tomorrowBullets = (() => {
+      const out = {};
+      document.querySelectorAll("[data-bullets][data-key]").forEach((card) => {
+        const k = card.dataset.key;
+        if (k === "notes") return;
+        const arr = loadJSON(`${tomorrowKey}:bullets:${k}`, []);
+        out[k] = { type: "bullets", items: arr.map((it) => ({ text: String(it?.text ?? "") })) };
+      });
+      return out;
+    })();
+
+    // Remove internal metadata from export
+    const tomorrowDayForExport = { ...tomorrowData };
+    delete tomorrowDayForExport.__carried;
+
+    const tomorrowPayload = {
+      day: tomorrowDayForExport,
+      bullets: tomorrowBullets,
+      notes: loadJSON(GLOBAL_NOTES_KEY, []),
+    };
+
+    // Write backups to predefined folder if available, else download
+    await autoExportBackups(todayPayload, tomorrowPayload);
+
+    // Advance the base day and reload
     const newBase = getPlannerDate(1);
     setBaseDate(newBase);
     location.reload();
@@ -160,9 +184,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bullets: collectBulletsFromDOM(),
       notes: loadJSON(GLOBAL_NOTES_KEY, []), // global notes unchanged
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${ymd(getPlannerDate(DAY_OFFSET))}-planner.json`;
@@ -170,9 +192,62 @@ document.addEventListener("DOMContentLoaded", () => {
     URL.revokeObjectURL(a.href);
   });
 
+  // ---- restore button ----
+  document.getElementById("restore")?.addEventListener("click", async () => {
+    // FS API path first
+    if ("showOpenFilePicker" in window && "showDirectoryPicker" in window) {
+      try {
+        let dir = await idbGet(KEY_RESTORE_DIR);
+        if (!dir) {
+          dir = await window.showDirectoryPicker({ id: "planner-restore" });
+          await idbSet(KEY_RESTORE_DIR, dir);
+        }
+        // Use saved directory as the starting location
+        const [fileHandle] = await window.showOpenFilePicker({
+          startIn: dir,
+          types: [{ description: "Planner JSON", accept: { "application/json": [".json"] } }],
+          multiple: false,
+          excludeAcceptAllOption: false,
+        });
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        applyRestorePayload(payload);
+        alert("Restored. Reloading…");
+        location.reload();
+        return;
+      } catch (e) {
+        // fall through to input-based flow
+        console.warn("FS API restore fallback:", e);
+      }
+    }
+
+    // Fallback: standard file input
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "application/json,.json";
+    inp.addEventListener("change", async () => {
+      const file = inp.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        applyRestorePayload(payload);
+        alert("Restored. Reloading…");
+        location.reload();
+      } catch (err) {
+        console.error(err);
+        alert("Invalid or unreadable JSON file.");
+      }
+    });
+    inp.click();
+  });
+
+
   // ---- pre-create tomorrow only when viewing "today" ----
   if (DAY_OFFSET === 0) ensureEmptyDay(1);
 });
+
 
 // ---- Restore from storage ----
 function restoreAll() {
@@ -193,6 +268,36 @@ function restoreAll() {
         smokeCb.dispatchEvent(new Event("change"));
       }
     });
+}
+
+function applyRestorePayload(payload) {
+  if (!payload || typeof payload !== "object") throw new Error("Bad payload");
+
+  const day = payload.day && typeof payload.day === "object" ? payload.day : {};
+  const bullets = payload.bullets && typeof payload.bullets === "object" ? payload.bullets : {};
+  const notes = Array.isArray(payload.notes)
+    ? payload.notes.map((it) => ({ text: String(it?.text ?? "") }))
+    : [];
+
+  const nextDay = {};
+  document.querySelectorAll("[data-checklist][data-key]").forEach((card) => {
+    const key = card.dataset.key;
+    const src = day[key] || {};
+    const items = Array.isArray(src.items)
+      ? src.items.map((it) => ({ text: String(it?.text ?? "").trim(), done: !!it?.done }))
+      : [];
+    nextDay[key] = { type: "checklist", items, smoke: !!src.smoke };
+  });
+
+  saveJSON(dayKey(), nextDay);
+
+  Object.keys(bullets).forEach((key) => {
+    const arr = Array.isArray(bullets[key]?.items) ? bullets[key].items : [];
+    const norm = arr.map((it) => ({ text: String(it?.text ?? "") }));
+    saveJSON(`${dayKey()}:bullets:${key}`, norm);
+  });
+
+  saveJSON(GLOBAL_NOTES_KEY, notes);
 }
 
 /** Checklist card */
@@ -499,6 +604,93 @@ function prefillTomorrowFromToday() {
   }
 }
 
+// ---- File System Access helpers (Chromium + HTTPS) ----
+const FS_DB = "planner-fs";
+const FS_STORE = "handles";
+const KEY_BACKUP_DIR = "backupDir";
+const KEY_RESTORE_DIR = "restoreDir";
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(FS_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(FS_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, value) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FS_STORE, "readwrite");
+    tx.objectStore(FS_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FS_STORE, "readonly");
+    const req = tx.objectStore(FS_STORE).get(key);
+    req.onsuccess = () => resolve(req.result ?? null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function ensurePermission(handle, mode = "readwrite") {
+  if (!handle?.queryPermission || !handle?.requestPermission) return false;
+  const o = { mode };
+  const q = await handle.queryPermission(o);
+  if (q === "granted") return true;
+  return (await handle.requestPermission(o)) === "granted";
+}
+
+async function writeJSONFile(dirHandle, filename, obj) {
+  if (!dirHandle) return false;
+  if (!(await ensurePermission(dirHandle, "readwrite"))) return false;
+  const fh = await dirHandle.getFileHandle(filename, { create: true });
+  const w = await fh.createWritable();
+  await w.write(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" }));
+  await w.close();
+  return true;
+}
+
+function downloadJSON(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function autoExportBackups(todayPayload, tomorrowPayload) {
+  const fnameToday = `${ymd(getPlannerDate(0))}-planner.json`;
+  const fnameTomorrow = `${ymd(getPlannerDate(1))}-planner.json`;
+
+  let wrote = false;
+  if ("showDirectoryPicker" in window) {
+    let dir = null;
+    try { dir = await idbGet(KEY_BACKUP_DIR); } catch { }
+    if (!dir) {
+      try {
+        dir = await window.showDirectoryPicker({ id: "planner-backups" });
+        await idbSet(KEY_BACKUP_DIR, dir);
+      } catch { dir = null; }
+    }
+    if (dir) {
+      try {
+        await writeJSONFile(dir, fnameToday, todayPayload);
+        await writeJSONFile(dir, fnameTomorrow, tomorrowPayload);
+        wrote = true;
+      } catch { wrote = false; }
+    }
+  }
+  if (!wrote) {
+    downloadJSON(fnameToday, todayPayload);
+    downloadJSON(fnameTomorrow, tomorrowPayload);
+  }
+}
 
 
 // DOM -> objects
