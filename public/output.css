@@ -220,8 +220,17 @@
   .top-1\/2 {
     top: calc(1/2 * 100%);
   }
+  .top-3 {
+    top: calc(var(--spacing) * 3);
+  }
+  .right-0 {
+    right: calc(var(--spacing) * 0);
+  }
   .right-2 {
     right: calc(var(--spacing) * 2);
+  }
+  .right-8 {
+    right: calc(var(--spacing) * 8);
   }
   .left-0 {
     left: calc(var(--spacing) * 0);
@@ -270,6 +279,9 @@
   }
   .ml-2 {
     margin-left: calc(var(--spacing) * 2);
+  }
+  .ml-auto {
+    margin-left: auto;
   }
   .block {
     display: block;
@@ -326,6 +338,9 @@
   }
   .w-full {
     width: 100%;
+  }
+  .max-w-fit {
+    max-width: fit-content;
   }
   .min-w-\[14ch\] {
     min-width: 14ch;
@@ -438,6 +453,9 @@
   }
   .self-center {
     align-self: center;
+  }
+  .self-end {
+    align-self: flex-end;
   }
   .self-start {
     align-self: flex-start;
@@ -624,6 +642,9 @@
   .text-main {
     color: var(--color-main);
   }
+  .text-neutral {
+    color: var(--color-neutral);
+  }
   .text-red-400 {
     color: var(--color-red-400);
   }
@@ -636,11 +657,17 @@
   .underline {
     text-decoration-line: underline;
   }
+  .decoration-accents {
+    text-decoration-color: var(--color-accents);
+  }
   .decoration-main {
     text-decoration-color: var(--color-main);
   }
   .decoration-2 {
     text-decoration-thickness: 2px;
+  }
+  .underline-offset-2 {
+    text-underline-offset: 2px;
   }
   .caret-accents {
     caret-color: var(--color-accents);
@@ -746,6 +773,13 @@
     }
     &::-webkit-details-marker {
       color: var(--color-main);
+    }
+  }
+  .hover\:cursor-pointer {
+    &:hover {
+      @media (hover: hover) {
+        cursor: pointer;
+      }
     }
   }
   .hover\:bg-neutral {

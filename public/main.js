@@ -524,8 +524,8 @@ function wireBullets(root) {
   }
 
   function addItem(text, restoring = false) {
-    const li = el("li", "mt-3 flex items-center gap-2");
-    const txt = el("span", "text-accents font-bold tracking-wide text-xl font-sec");
+    const li = el("li", "mt-3 flex items-center gap-2 px-3");
+    const txt = el("span", "flex-1 text-accents font-bold tracking-wide text-xl font-sec");
     txt.textContent = text;
     txt.setAttribute("data-role", "text");
 
@@ -740,6 +740,7 @@ function snapshotDay() {
   next.__smokes = getSmokesCountFromDOM();
   if (prev.__carried) next.__carried = prev.__carried;
   if (prev.__smokeCounted) next.__smokeCounted = prev.__smokeCounted;
+  if (prev.__clearedDone) next.__clearedDone = prev.__clearedDone;
   saveJSON(key, next);
 }
 
@@ -867,6 +868,73 @@ function collapsePastTimeCards() {
   }
 }
 
+// --- Clear-checked (Work/Home/Shopping, Today only) ---
+// --- Clear-checked (Work/Home/Shopping, Today only) ---
+// Stores cleared done items under day.__clearedDone[cardKey] = [text,...]
+function wireClearChecked() {
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-clear-checked]");
+    if (!btn) return;
+
+    if (DAY_OFFSET !== 0) return; // only on Today
+
+    const card = btn.closest("[data-checklist][data-key]");
+    const key = card?.dataset.key;
+    if (!card || !["work", "home", "shopping"].includes(key)) return;
+
+    const list = card.querySelector("[data-checklist-list]");
+    if (!list) return;
+
+    // collect checked items' labels
+    const texts = [];
+    [...list.querySelectorAll("li")].forEach((li) => {
+      const cb = li.querySelector('input[type="checkbox"]');
+      if (cb?.checked) {
+        const label = li.querySelector('[data-role="label"]');
+        const txt = (label?.textContent || "").trim();
+        if (txt) texts.push(txt);
+      }
+    });
+
+    // archive them (do this before removing from DOM)
+    if (texts.length) {
+      const k = dayKey();
+      const day = loadJSON(k, {}) || {};
+      const arch = day.__clearedDone || {};
+      arch[key] = [...(arch[key] || []), ...texts];
+      day.__clearedDone = arch;
+      saveJSON(k, day);
+    }
+
+    // now remove from DOM
+    [...list.querySelectorAll("li")].forEach((li) => {
+      const cb = li.querySelector('input[type="checkbox"]');
+      if (cb?.checked) li.remove();
+    });
+
+    snapshotDay();
+  });
+}
+
+// Merge archived cleared-done items into a dayObj (for JSON export only)
+function mergeClearedIntoDayObj(dayObj, arch) {
+  if (!arch) return dayObj;
+  Object.keys(arch).forEach((key) => {
+    const cleared = arch[key] || [];
+    if (!cleared.length) return;
+    if (!dayObj[key]) dayObj[key] = { type: "checklist", items: [], smoke: false };
+
+    const have = new Set((dayObj[key].items || []).map((it) => _norm(it.text)));
+    cleared.forEach((t) => {
+      const text = typeof t === "string" ? t : (t?.text || "");
+      const n = _norm(text);
+      if (text && !have.has(n)) dayObj[key].items.push({ text, done: true });
+    });
+  });
+  return dayObj;
+}
+
+
 /* -------- Boot -------- */
 document.addEventListener("DOMContentLoaded", () => {
   setHeaderAndTitle();
@@ -876,6 +944,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-bullets]").forEach(wireBullets);
   document.querySelectorAll("[data-countdown]").forEach(wireCountdown);
 
+  wireClearChecked();
   prefillTomorrowFromToday();
   restoreAll();
   collapsePastTimeCards();
@@ -885,11 +954,16 @@ document.addEventListener("DOMContentLoaded", () => {
   highlightCurrentBlock();
   setInterval(highlightCurrentBlock, 5 * 60 * 1000);
 
-  // Download today (DOM snapshot)
+  // Download today (DOM snapshot + archived-cleared)
   document.getElementById("download-today")?.addEventListener("click", () => {
     const ds = ymd(getPlannerDate(DAY_OFFSET));
     const dayObj = collectChecklistsFromDOM();
     dayObj.__smokes = getSmokesCountFromDOM();
+
+    // merge archived cleared-done (from storage) into the export
+    const stored = loadJSON(dayKey(DAY_OFFSET), {}) || {};
+    mergeClearedIntoDayObj(dayObj, stored.__clearedDone);
+
     const payload = {
       version: 2,
       date: ds,
@@ -899,6 +973,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     saveViaHref(`${ds}-planner.json`, payload);
   });
+
 
   // Restore from JSON (opens remembered folder if supported)
   document.getElementById("restore")?.addEventListener("click", async () => {
@@ -959,6 +1034,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const dsTomorrow = ymd(getPlannerDate(1));
     const dayToday = collectChecklistsFromDOM();
     dayToday.__smokes = getSmokesCountFromDOM();
+    const storedToday = loadJSON(todayKey, {}) || {};
+    mergeClearedIntoDayObj(dayToday, storedToday.__clearedDone);
+
     const payloadToday = {
       version: 2,
       date: dsToday,
