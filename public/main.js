@@ -6,6 +6,7 @@ function getPageOffset() {
   return Number.isFinite(raw) ? raw : 0;
 }
 const DAY_OFFSET = getPageOffset();
+const NAV_DELAY_MS = 350;
 
 /* -------- Date helpers -------- */
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -15,10 +16,7 @@ function ymd(d) {
   const day = pad2(d.getDate());
   return `${y}-${m}-${day}`;
 }
-const weekday3 = (i) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][i];
-const daysLong = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const monthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const monthsLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 const ord = (n) => { const v = n % 100; if (v >= 11 && v <= 13) return "th"; switch (n % 10) { case 1: return "st"; case 2: return "nd"; case 3: return "rd"; default: return "th"; } };
 
 /* -------- Storage model (matches your schema) -------- */
@@ -52,8 +50,12 @@ function dayKeyFromDateStr(ds) {
 }
 const GLOBAL_NOTES_KEY = "planner:notes";
 const GLOBAL_COUNTDOWN_KEY = "planner:countdown";
-function bulletsStorageKeyFor(key) { if (!key || key === "notes") return GLOBAL_NOTES_KEY; return `${dayKey()}:bullets:${key}`; }
-function bulletsStorageKeyForDate(ds, key) { if (!key || key === "notes") return GLOBAL_NOTES_KEY; return `${dayKeyFromDateStr(ds)}:bullets:${key}`; }
+function bulletsKey(key, ds = null) {
+  if (!key || key === "notes") return GLOBAL_NOTES_KEY;
+  const base = ds ? dayKeyFromDateStr(ds) : dayKey();
+  return `${base}:bullets:${key}`;
+}
+
 
 /* -------- JSON helpers -------- */
 function loadJSON(key, fallback) {
@@ -63,6 +65,46 @@ function loadJSON(key, fallback) {
 function saveJSON(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
+
+// Shallow item-array equality: [{text,done}, ...]
+function itemsEqual(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const ax = a[i] || {}, bx = b[i] || {};
+    if (((ax.text || "").trim()) !== ((bx.text || "").trim())) return false;
+    if (!!ax.done !== !!bx.done) return false;
+  }
+  return true;
+}
+
+// { key: [normText,...] } equality (order-sensitive per array)
+function carriedMetaEqual(a = {}, b = {}) {
+  const ak = Object.keys(a), bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!(k in b)) return false;
+    const av = a[k] || [], bv = b[k] || [];
+    if (av.length !== bv.length) return false;
+    for (let i = 0; i < av.length; i++) if (av[i] !== bv[i]) return false;
+  }
+  return true;
+}
+
+
+// Read bullets for a specific YYYY-MM-DD from storage
+function readBulletsForDate(ds) {
+  const out = {};
+  const prefix = `${dayKeyFromDateStr(ds)}:bullets:`;
+  Object.keys(localStorage).forEach((k) => {
+    if (k.startsWith(prefix)) {
+      const listKey = k.slice(prefix.length);
+      out[listKey] = { type: "bullets", items: loadJSON(k, []) };
+    }
+  });
+  return out;
+}
+
+
 // --- Global checklist templates ---
 const TPL_KEY = "planner:templates:v1";
 const readTemplates = () => loadJSON(TPL_KEY, {});
@@ -72,7 +114,6 @@ const saveTemplates = (obj) => saveJSON(TPL_KEY, obj);
 const _norm = (s) => (s || "").trim().toLowerCase();
 
 /* -------- File System Access + IndexedDB handle storage -------- */
-const hasFS = !!(window.showDirectoryPicker || window.showSaveFilePicker);
 const FS_DB = "plannerFS";
 const FS_STORE = "handles";
 const FS_KEYS = { DIR: "downloadDirHandle" };
@@ -106,36 +147,7 @@ const idb = {
   },
 };
 
-async function ensureDirHandle() {
-  if (!hasFS || !window.showDirectoryPicker) return null;
-  let handle = await idb.get(FS_KEYS.DIR);
-  try {
-    if (handle) {
-      const p = await handle.queryPermission({ mode: "readwrite" });
-      if (p === "granted") return handle;
-      const req = await handle.requestPermission({ mode: "readwrite" });
-      if (req === "granted") return handle;
-    }
-  } catch { }
-  try {
-    handle = await window.showDirectoryPicker();
-    const perm = await handle.requestPermission({ mode: "readwrite" });
-    if (perm === "granted") {
-      await idb.put(FS_KEYS.DIR, handle);
-      return handle;
-    }
-  } catch { }
-  return null;
-}
-async function writeJSONToDir(dirHandle, filename, obj) {
-  try {
-    const fh = await dirHandle.getFileHandle(filename, { create: true });
-    const w = await fh.createWritable();
-    await w.write(JSON.stringify(obj, null, 2));
-    await w.close();
-    return true;
-  } catch { return false; }
-}
+
 function saveViaHref(filename, obj) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -161,14 +173,7 @@ function buildExport(offset) {
   } else {
     // Export from storage for a non-active day
     dayObj = loadJSON(dayKey(offset), {}) || {};
-    bullets = {};
-    const prefix = `${dayKeyFromDateStr(ds)}:bullets:`;
-    Object.keys(localStorage).forEach((k) => {
-      if (k.startsWith(prefix)) {
-        const listKey = k.slice(prefix.length);
-        bullets[listKey] = { type: "bullets", items: loadJSON(k, []) };
-      }
-    });
+    bullets = readBulletsForDate(ds);
   }
 
   return {
@@ -189,28 +194,31 @@ function downloadDayViaHref(offset) {
   saveViaHref(filename, payload);
 }
 
-async function downloadJSON(filename, obj) {
-  const dir = await ensureDirHandle();
-  if (dir) {
-    const ok = await writeJSONToDir(dir, filename, obj);
-    if (!ok) saveViaHref(filename, obj);
-  } else {
-    saveViaHref(filename, obj);
-  }
-}
 async function pickFileFromRememberedDir() {
   let opts = {
     types: [{ description: "Planner JSON", accept: { "application/json": [".json"] } }],
     multiple: false,
   };
-  const dir = await idb.get(FS_KEYS.DIR);
-  if (dir && window.showOpenFilePicker) {
-    try { opts.startIn = dir; } catch { }
+
+  // Try to start in the last used handle (Chromium File System Access API)
+  if (window.showOpenFilePicker) {
+    try {
+      const last = await idb.get(FS_KEYS.DIR); // stored FileSystemFileHandle
+      if (last) {
+        // Best-effort permission check; not strictly required for startIn
+        const p = await last.queryPermission?.({ mode: "read" });
+        if (p === "granted" || p === "prompt" || p == null) opts.startIn = last;
+      }
+    } catch { /* noop */ }
   }
+
   if (window.showOpenFilePicker) {
     const [h] = await window.showOpenFilePicker(opts);
+    // Remember this handle for next time
+    try { await idb.put(FS_KEYS.DIR, h); } catch { /* noop */ }
     return await h.getFile();
   }
+
   // Fallback
   return new Promise((res, rej) => {
     const inp = document.createElement("input");
@@ -221,6 +229,7 @@ async function pickFileFromRememberedDir() {
     inp.click();
   });
 }
+
 
 /* -------- UI helpers -------- */
 function el(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text != null) n.textContent = text; return n; }
@@ -317,7 +326,8 @@ function applyCollapsedUI(key, collapsed) {
   }
 }
 
-function refreshTomorrowPreviewAfterTodayChange() {
+// Sync tomorrow from today. mode: "time" = TIME_KEYS only, "all" = all checklist keys
+function syncTomorrowFromToday(mode = "time") {
   const todayData = loadJSON(dayKey(0), {}) || {};
   const tKey = dayKey(1);
   const tomorrowData = loadJSON(tKey, {}) || {};
@@ -325,7 +335,9 @@ function refreshTomorrowPreviewAfterTodayChange() {
   const newCarriedMeta = {};
   let changed = false;
 
-  TIME_KEYS.forEach((key) => {
+  const keys = mode === "all" ? Object.keys(todayData) : TIME_KEYS;
+
+  keys.forEach((key) => {
     const entry = todayData[key];
     if (!entry || entry.type !== "checklist" || !Array.isArray(entry.items)) return;
 
@@ -342,18 +354,28 @@ function refreshTomorrowPreviewAfterTodayChange() {
     carryMap.forEach((orig, norm) => { if (!nativeSet.has(norm)) newCarriedItems.push({ text: orig, done: false }); });
 
     const nextItems = [...newCarriedItems, ...native];
-    if (JSON.stringify(existing) !== JSON.stringify(nextItems)) {
+    if (!itemsEqual(existing, nextItems)) {
       changed = true;
       if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
       tomorrowData[key].items = nextItems;
     }
+
   });
 
-  if (changed || JSON.stringify(tomorrowData.__carried || {}) !== JSON.stringify(newCarriedMeta)) {
+  if (changed || !carriedMetaEqual(tomorrowData.__carried || {}, newCarriedMeta)) {
     tomorrowData.__carried = newCarriedMeta;
     saveJSON(tKey, tomorrowData);
   }
+
 }
+
+// --- debounced sync trigger
+function debounce(fn, ms = 200) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+const syncTomorrowDebounced = debounce((mode) => syncTomorrowFromToday(mode), 200);
+
+
 
 function getSmokesCountFromDOM() {
   const el = document.getElementById("smokescount");
@@ -381,13 +403,27 @@ function updateGreeting() {
 }
 function setHeaderAndTitle() {
   const d = getPlannerDate(DAY_OFFSET);
-  document.title = `${weekday3(d.getDay())} ${pad2(d.getDate())}-${monthsShort[d.getMonth()]}`;
-  const todayEl = document.getElementById("today");
-  if (todayEl) {
-    todayEl.textContent =
-      `${daysLong[d.getDay()]}, ${d.getDate()}${ord(d.getDate())} of ${monthsLong[d.getMonth()]}`;
-  }
+
+  // Title: "Wed 05-Oct"
+  const tParts = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short', day: '2-digit', month: 'short'
+  }).formatToParts(d);
+  const w = tParts.find(p => p.type === 'weekday')?.value || '';
+  const dd = tParts.find(p => p.type === 'day')?.value || '';
+  const mon = tParts.find(p => p.type === 'month')?.value || '';
+  document.title = `${w} ${dd}-${mon}`;
+
+  // Header: "Wednesday, 5th of October"
+  const hParts = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  }).formatToParts(d);
+  const W = hParts.find(p => p.type === 'weekday')?.value || '';
+  const Dn = Number(hParts.find(p => p.type === 'day')?.value || 0);
+  const M = hParts.find(p => p.type === 'month')?.value || '';
+  const todayEl = document.getElementById('today');
+  if (todayEl) todayEl.textContent = `${W}, ${Dn}${ord(Dn)} of ${M}`;
 }
+
 
 /* -------- Highlight current block (today only) -------- */
 function highlightCurrentBlock() {
@@ -617,11 +653,6 @@ function wireChecklist(root) {
   if (smoke) wireSmoke(smoke);
 }
 
-const smokescountPlus = document.getElementById("smokescount-plus");
-smokescountPlus?.addEventListener("click", () => {
-  setSmokesCount(getSmokesCountFromDOM() + 1);
-  snapshotDay();
-});
 
 /* -------- Bullets (global Notes vs day-scoped Food, etc.) -------- */
 function wireBullets(root) {
@@ -632,13 +663,13 @@ function wireBullets(root) {
   if (!form || !input || !list) return;
 
   function readItems() {
-    const v = loadJSON(bulletsStorageKeyFor(key), []);
+    const v = loadJSON(bulletsKey(key), []);
     if (Array.isArray(v)) return v;
     if (v && typeof v === "object" && Array.isArray(v.items)) return v.items;
     return [];
   }
   function writeItems(items) {
-    saveJSON(bulletsStorageKeyFor(key), items);
+    saveJSON(bulletsKey(key), items);
   }
   function currentItems() {
     return [...list.querySelectorAll('[data-role="text"]')].map((el) => ({
@@ -776,46 +807,6 @@ function wireSmoke(container) {
   });
 }
 
-/* -------- Tomorrow preview persistence (+auto-dedupe) -------- */
-function prefillTomorrowFromToday() {
-  if (DAY_OFFSET !== 1) return;
-  const todayData = loadJSON(dayKey(0), {}) || {};
-  const tKey = dayKey(1);
-  const tomorrowData = loadJSON(tKey, {}) || {};
-  const prevCarriedMeta = tomorrowData.__carried || {};
-  const newCarriedMeta = {};
-  let changed = false;
-
-  Object.keys(todayData).forEach((key) => {
-    const entry = todayData[key];
-    if (!entry || entry.type !== "checklist" || !Array.isArray(entry.items)) return;
-
-    const carryMap = new Map();
-    entry.items.forEach((it) => { if (!it.done) { const n = _norm(it.text); if (n) carryMap.set(n, it.text); } });
-    newCarriedMeta[key] = Array.from(carryMap.keys());
-
-    const existing = (tomorrowData[key] && Array.isArray(tomorrowData[key].items)) ? tomorrowData[key].items : [];
-    const prevCarriedSet = new Set((prevCarriedMeta[key] || []).map(_norm));
-    const native = existing.filter((it) => !prevCarriedSet.has(_norm(it.text)));
-
-    const nativeSet = new Set(native.map((it) => _norm(it.text)));
-    const newCarriedItems = [];
-    carryMap.forEach((orig, norm) => { if (!nativeSet.has(norm)) newCarriedItems.push({ text: orig, done: false }); });
-
-    const nextItems = [...newCarriedItems, ...native];
-    if (JSON.stringify(existing) !== JSON.stringify(nextItems)) {
-      changed = true;
-      if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
-      tomorrowData[key].items = nextItems;
-    }
-  });
-
-  if (changed || JSON.stringify(tomorrowData.__carried || {}) !== JSON.stringify(newCarriedMeta)) {
-    tomorrowData.__carried = newCarriedMeta;
-    saveJSON(tKey, tomorrowData);
-  }
-}
-
 /* -------- Restore current page from storage to DOM -------- */
 function restoreAll() {
   const dayData = loadJSON(dayKey(), {});
@@ -872,7 +863,10 @@ function snapshotDay() {
   if (prev.__smokeCounted) next.__smokeCounted = prev.__smokeCounted;
   if (prev.__clearedDone) next.__clearedDone = prev.__clearedDone;
   saveJSON(key, next);
+
+  if (DAY_OFFSET === 0) syncTomorrowDebounced("time");
 }
+
 
 /* -------- Ensure blank tomorrow exists (today view) -------- */
 function ensureEmptyDay(offset = 1) {
@@ -891,6 +885,7 @@ function wireCountdown(root) {
   const view = root.querySelector('[data-countdown-view]');
   const titleEl = root.querySelector('[data-countdown-title]');
   const display = root.querySelector('[data-countdown-display]');
+  display?.setAttribute('aria-live', 'polite');
   const labelIn = root.querySelector('[data-countdown-label]');
   const whenIn = root.querySelector('[data-countdown-when]');
   const startBtn = root.querySelector('[data-countdown-start]');
@@ -994,12 +989,11 @@ function collapsePastTimeCards() {
   if (moved) {
     saveJSON(key, data);
     TIME_KEYS.forEach(renderCardFromStorage);
-    refreshTomorrowPreviewAfterTodayChange();
+    syncTomorrowDebounced("time");
   }
+
 }
 
-// --- Clear-checked (Work/Home/Shopping, Today only) ---
-// --- Clear-checked (Work/Home/Shopping, Today only) ---
 // Stores cleared done items under day.__clearedDone[cardKey] = [text,...]
 function wireClearChecked() {
   document.addEventListener("click", (e) => {
@@ -1064,6 +1058,64 @@ function mergeClearedIntoDayObj(dayObj, arch) {
   return dayObj;
 }
 
+async function onRestore() {
+  try {
+    const file = await pickFileFromRememberedDir();
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    const ds = data.date || (file.name.match(/^(\d{4}-\d{2}-\d{2})-planner\.json$/)?.[1]) || ymd(getPlannerDate(DAY_OFFSET));
+    const dKey = dayKeyFromDateStr(ds);
+
+    if (data.day && typeof data.day === "object") saveJSON(dKey, data.day);
+    if (data.bullets && typeof data.bullets === "object") {
+      Object.keys(data.bullets).forEach((k) => {
+        const entry = data.bullets[k];
+        const items = Array.isArray(entry?.items) ? entry.items : [];
+        saveJSON(bulletsKey(k, ds), items);
+      });
+    }
+    if (Array.isArray(data.notes)) saveJSON(GLOBAL_NOTES_KEY, data.notes);
+
+    const currentDS = ymd(getPlannerDate(DAY_OFFSET));
+    if (ds === currentDS) location.reload();
+    else alert(`Restored ${ds}. Switch to that day to view it.`);
+  } catch {
+    alert("Restore failed. Pick a valid planner JSON.");
+  }
+}
+
+function onEndDay() {
+  const todayKey = dayKey(0);
+  const tomorrowKey = dayKey(1);
+
+  ensureEmptyDay(1);
+
+  const todayData = loadJSON(todayKey, {}) || {};
+  const tomorrowData = loadJSON(tomorrowKey, {}) || {};
+  const carriedMeta = {};
+
+  Object.keys(todayData || {}).forEach((key) => {
+    const entry = todayData[key];
+    if (entry?.type === "checklist" && Array.isArray(entry.items)) {
+      const carry = entry.items.filter((it) => !it.done);
+      if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
+      tomorrowData[key].items = [...carry, ...(tomorrowData[key].items || [])];
+      if (carry.length) carriedMeta[key] = carry.map((it) => _norm(it.text)).filter(Boolean);
+    }
+  });
+  tomorrowData.__carried = carriedMeta;
+  saveJSON(tomorrowKey, tomorrowData);
+
+  downloadDayViaHref(0);
+  downloadDayViaHref(1);
+
+  setTimeout(() => {
+    setBaseDate(getPlannerDate(1));
+    location.href = "./index.html";
+  }, NAV_DELAY_MS);
+}
+
 
 /* -------- Boot -------- */
 document.addEventListener("DOMContentLoaded", () => {
@@ -1075,7 +1127,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-countdown]").forEach(wireCountdown);
 
   wireClearChecked();
-  prefillTomorrowFromToday();
+  if (DAY_OFFSET === 1) syncTomorrowFromToday("all");
   restoreAll();
   collapsePastTimeCards();
   setInterval(collapsePastTimeCards, 5 * 60 * 1000); // every 5 minutes
@@ -1084,97 +1136,20 @@ document.addEventListener("DOMContentLoaded", () => {
   highlightCurrentBlock();
   setInterval(highlightCurrentBlock, 5 * 60 * 1000);
 
-  // Download the current view's day (works on today and on tomorrow.html)
-  document.getElementById("download-today")?.addEventListener("click", () => {
-    downloadDayViaHref(DAY_OFFSET);
+  document.getElementById("smokescount-plus")?.addEventListener("click", () => {
+    setSmokesCount(getSmokesCountFromDOM() + 1);
+    snapshotDay();
+  });
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    e.preventDefault();
+    const act = btn.dataset.action;
+    if (act === "download") downloadDayViaHref(DAY_OFFSET);
+    else if (act === "restore") onRestore();
+    else if (act === "endday") onEndDay();
   });
 
 
-
-  // Restore from JSON (opens remembered folder if supported)
-  document.getElementById("restore")?.addEventListener("click", async () => {
-    try {
-      const file = await pickFileFromRememberedDir();
-      const text = await file.text();
-      const data = JSON.parse(text);
-
-      const ds = data.date || (file.name.match(/^(\d{4}-\d{2}-\d{2})-planner\.json$/)?.[1]) || ymd(getPlannerDate(DAY_OFFSET));
-      const dKey = dayKeyFromDateStr(ds);
-
-      if (data.day && typeof data.day === "object") saveJSON(dKey, data.day);
-      if (data.bullets && typeof data.bullets === "object") {
-        Object.keys(data.bullets).forEach((k) => {
-          const entry = data.bullets[k];
-          const items = Array.isArray(entry?.items) ? entry.items : [];
-          saveJSON(bulletsStorageKeyForDate(ds, k), items);
-        });
-      }
-      if (Array.isArray(data.notes)) saveJSON(GLOBAL_NOTES_KEY, data.notes);
-
-      const currentDS = ymd(getPlannerDate(DAY_OFFSET));
-      if (ds === currentDS) location.reload();
-      else alert(`Restored ${ds}. Switch to that day to view it.`);
-    } catch {
-      alert("Restore failed. Pick a valid planner JSON.");
-    }
-  });
-
-  // End day
-  document.getElementById("endday")?.addEventListener("click", async () => {
-    const todayKey = dayKey(0);
-    const tomorrowKey = dayKey(1);
-
-    ensureEmptyDay(1);
-
-    const todayData = loadJSON(todayKey, {}) || {};
-    const tomorrowData = loadJSON(tomorrowKey, {}) || {};
-    const carriedMeta = {};
-
-    Object.keys(todayData || {}).forEach((key) => {
-      const entry = todayData[key];
-      if (entry?.type === "checklist" && Array.isArray(entry.items)) {
-        const carry = entry.items.filter((it) => !it.done);
-        if (!tomorrowData[key]) {
-          tomorrowData[key] = { type: "checklist", items: [], smoke: false };
-        }
-        tomorrowData[key].items = [...carry, ...(tomorrowData[key].items || [])];
-        if (carry.length) {
-          carriedMeta[key] = carry.map((it) => _norm(it.text)).filter(Boolean);
-        }
-      }
-    });
-    tomorrowData.__carried = carriedMeta;
-    saveJSON(tomorrowKey, tomorrowData);
-
-    const dsToday = ymd(getPlannerDate(0));
-    const dsTomorrow = ymd(getPlannerDate(1));
-    const dayToday = collectChecklistsFromDOM();
-    dayToday.__smokes = getSmokesCountFromDOM();
-    const storedToday = loadJSON(todayKey, {}) || {};
-    mergeClearedIntoDayObj(dayToday, storedToday.__clearedDone);
-
-    const payloadToday = {
-      version: 2,
-      date: dsToday,
-      day: dayToday,
-      bullets: collectBulletsFromDOM(),
-      notes: loadJSON(GLOBAL_NOTES_KEY, []),
-    };
-    const tomorrowBullets = {};
-    Object.keys(localStorage).forEach((k) => {
-      const m = k.match(/^planner:\d{4}-\d{2}-\d{2}:bullets:(.+)$/);
-      if (m && k.startsWith(dayKeyFromDateStr(dsTomorrow))) {
-        const listKey = m[1];
-        tomorrowBullets[listKey] = { type: "bullets", items: loadJSON(k, []) };
-      }
-    });
-    const payloadTomorrow = { version: 2, date: dsTomorrow, day: loadJSON(tomorrowKey, {}), bullets: tomorrowBullets, notes: loadJSON(GLOBAL_NOTES_KEY, []) };
-
-    await downloadJSON(`${dsToday}-planner.json`, payloadToday);
-    await downloadJSON(`${dsTomorrow}-planner.json`, payloadTomorrow);
-
-    const newBase = getPlannerDate(1);
-    setBaseDate(newBase);
-    location.href = "./index.html";
-  });
 });
