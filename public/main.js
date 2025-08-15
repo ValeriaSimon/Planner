@@ -201,6 +201,16 @@ function capWords(s) {
   return String(s).replace(/(^|[\s\-\/])([^\s\-\/])/g, (m, sep, ch) => sep + ch.toLocaleUpperCase());
 }
 
+/* --- inline edit + reorder helpers --- */
+let DRAG_SRC = null;
+function placeCaretEnd(el) {
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  r.collapse(false);
+  const s = window.getSelection();
+  s.removeAllRanges();
+  s.addRange(r);
+}
 
 /* --- time-card collapse helpers --- */
 const TIME_KEYS = ["morning", "daytime", "evening"];
@@ -373,27 +383,33 @@ function wireChecklist(root) {
   }
 
   function addItem(labelText, done = false, restoring = false) {
-    const itemId = `cb-${cardKey}-${Date.now()}-${id++}`;  // <-- unique per card
-    const li = el("li", "flex items-center gap-3 py-3 px-3 group");
-
-    const row = el("label", "flex items-center gap-3 cursor-pointer w-full select-none");
+    const itemId = `cb-${cardKey}-${Date.now()}-${id++}`;
+    const li = el("li", "flex items-center gap-2 py-3 px-3 group");
+    const row = el("label", "flex items-center gap-2 cursor-pointer w-full select-none");
     row.setAttribute("for", itemId);
 
-    const cb = el("input", "sr-only");
-    cb.type = "checkbox";
-    cb.id = itemId;
+    const cb = el("input", "sr-only"); cb.type = "checkbox"; cb.id = itemId;
 
     const box = el("span", "inline-flex items-center justify-center size-6 rounded-full bg-white border-2 border-main transition-colors");
-    const icon = svgCheck();
-    icon.style.opacity = "0";
-    icon.style.transition = "opacity 150ms";
-    icon.setAttribute("data-role", "icon");
-    box.appendChild(icon);
-    box.setAttribute("data-role", "box");
+    const icon = svgCheck(); icon.style.opacity = "0"; icon.style.transition = "opacity 150ms"; icon.setAttribute("aria-hidden", "true"); box.appendChild(icon);
 
     const label = el("span", "flex-1 text-accents font-bold tracking-wide text-xl font-sec decoration-main decoration-2 mt-3", labelText);
     label.setAttribute("data-role", "label");
 
+    // edit button
+    const edit = el("button", "px-2 py-1 rounded-md text-accents/80 hover:text-white hover:bg-neutral transition-colors", "✎");
+    edit.type = "button"; edit.title = "Edit";
+
+    // delete button
+    const del = el("button", "px-2 py-1 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors", "✕");
+    del.type = "button"; del.title = "Remove";
+
+    // drag handle
+    const handle = el("span", "ml-1 cursor-grab select-none text-accents/60", "⋮⋮");
+    handle.setAttribute("data-handle", "1");
+    li.draggable = true;
+
+    // checkbox change
     cb.addEventListener("change", () => {
       const checked = cb.checked;
       label.classList.toggle("line-through", checked);
@@ -404,13 +420,68 @@ function wireChecklist(root) {
       if (!suppressSave) snapshotDay();
     });
 
-    const del = el("button", "rounded-md px-2 py-1 text-red-400 hover:text-white hover:bg-neutral transition-colors opacity-0 group-hover:opacity-100", "✕");
-    del.type = "button";
-    del.title = "Remove";
+    // edit mode
+    edit.addEventListener("click", () => {
+      if (label.isContentEditable) return;
+      var original = label.textContent;
+      label.contentEditable = "true";
+      label.style.outline = "none";
+      row.removeAttribute("for"); // don’t toggle checkbox while editing
+      label.focus(); placeCaretEnd(label);
+
+
+      function commit() {
+        label.textContent = (label.textContent || "").trim();
+        if (!label.textContent) { li.remove(); snapshotDay(); cleanup(); return; }
+        label.contentEditable = "false";
+        row.setAttribute("for", itemId);
+        snapshotDay(); cleanup();
+      }
+      function cancel() {
+        label.textContent = original;
+        label.contentEditable = "false";
+        row.setAttribute("for", itemId);
+        cleanup();
+      }
+      function onKey(e) {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      }
+      function cleanup() {
+        label.removeEventListener("keydown", onKey);
+        label.removeEventListener("blur", commit);
+      }
+      label.addEventListener("keydown", onKey);
+      label.addEventListener("blur", commit);
+    });
+
+    // delete
     del.addEventListener("click", () => { li.remove(); if (!suppressSave) snapshotDay(); });
 
+    // DnD reorder (drag from anywhere unless editing or clicking controls)
+    li.addEventListener("dragstart", (e) => {
+      const t = e.target;
+      if (label.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
+      DRAG_SRC = li;
+      li.classList.add("opacity-50");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", itemId);
+    });
+    li.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+    li.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (!DRAG_SRC || DRAG_SRC === li) return;
+      const items = [...list.children];
+      const src = items.indexOf(DRAG_SRC);
+      const dst = items.indexOf(li);
+      if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling);
+      else list.insertBefore(DRAG_SRC, li);
+      snapshotDay();
+    });
+    li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
+
     row.append(cb, box, label);
-    li.append(row, del);
+    li.append(handle, row, edit, del);
     list.appendChild(li);
 
     suppressSave = true;
@@ -421,13 +492,14 @@ function wireChecklist(root) {
     if (!restoring) snapshotDay();
   }
 
+
   root.__addChecklistItem = (text, done = false, restoring = false) => addItem(text, done, restoring);
 
   const smoke = root.querySelector("[data-smoke]");
   if (smoke) wireSmoke(smoke);
 }
 
-const smokescount = document.getElementById("smokescount");
+
 const smokescountPlus = document.getElementById("smokescount-plus");
 smokescountPlus?.addEventListener("click", () => {
   setSmokesCount(getSmokesCountFromDOM() + 1);
@@ -467,32 +539,74 @@ function wireBullets(root) {
   }
 
   function addItem(text, restoring = false) {
-    const li = el("li", "mt-3");
-    const row = el("div", "flex items-center gap-3");
-
+    const li = el("li", "mt-3 flex items-center gap-2");
     const txt = el("span", "text-accents font-bold tracking-wide text-xl font-sec");
     txt.textContent = text;
     txt.setAttribute("data-role", "text");
 
-    const del = el(
-      "button",
-      "ml-auto inline-flex items-center justify-center size-6 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors",
-      "✕"
-    );
-    del.type = "button";
-    del.title = "Remove";
-    del.setAttribute("aria-label", `Remove "${text}"`);
-    del.addEventListener("click", () => {
-      li.remove();
-      writeItems(currentItems());
+    const edit = el("button", "px-2 py-1 rounded-md text-accents/80 hover:text-white hover:bg-neutral transition-colors", "✎");
+    edit.type = "button"; edit.title = "Edit";
+
+    const del = el("button", "px-2 py-1 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors", "✕");
+    del.type = "button"; del.title = "Remove"; del.setAttribute("aria-label", `Remove "${text}"`);
+
+    const handle = el("span", "ml-1 cursor-grab select-none text-accents/60", "⋮⋮");
+    handle.setAttribute("data-handle", "1");
+    li.draggable = true;
+
+    // inline edit
+    edit.addEventListener("click", () => {
+      if (txt.isContentEditable) return;
+      const original = txt.textContent;
+      txt.contentEditable = "true";
+      txt.style.outline = "none";
+      txt.focus(); placeCaretEnd(txt);
+
+      function commit() {
+        txt.textContent = (txt.textContent || "").trim();
+        if (!txt.textContent) { li.remove(); writeItems(currentItems()); cleanup(); return; }
+        txt.contentEditable = "false";
+        writeItems(currentItems());
+        cleanup();
+      }
+      function cancel() { txt.textContent = original; txt.contentEditable = "false"; cleanup(); }
+      function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
+      function cleanup() { txt.removeEventListener("keydown", onKey); txt.removeEventListener("blur", commit); }
+
+      txt.addEventListener("keydown", onKey);
+      txt.addEventListener("blur", commit);
     });
 
-    row.append(txt, del);
-    li.appendChild(row);
+    // delete
+    del.addEventListener("click", () => { li.remove(); writeItems(currentItems()); });
+
+    // Drag from anywhere unless editing or clicking controls
+    li.addEventListener("dragstart", (e) => {
+      const t = e.target;
+      if (txt.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
+      DRAG_SRC = li;
+      li.classList.add("opacity-50");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    li.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+    li.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (!DRAG_SRC || DRAG_SRC === li) return;
+      const items = [...list.children];
+      const src = items.indexOf(DRAG_SRC);
+      const dst = items.indexOf(li);
+      if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling); else list.insertBefore(DRAG_SRC, li);
+      writeItems(currentItems());
+    });
+    li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
+
+    li.append(handle, txt, edit, del);
     list.appendChild(li);
 
     if (!restoring) writeItems(currentItems());
   }
+
+
 
   // init
   list.innerHTML = "";
