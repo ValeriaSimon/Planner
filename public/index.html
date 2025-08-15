@@ -135,12 +135,17 @@
                            hover:bg-neutral transition-colors duration-300">
                             Add
                         </button>
+                        <button type="button" class="my-auto flex gap-1">
+                            <i class="fa-solid fa-folder-open" style="color: #1C2317;">
+                            </i>
+                            <i class="fa-solid fa-caret-down" style="color: #1C2317;"></i>
+                        </button>
                     </form>
                 </div>
 
                 <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
 
-                <!-- Optional static item -->
+                <hr class="mt-4 border-1 w-[75%] mx-auto border-b border-main/40 rounded-full" />
                 <div class="mt-4" data-smoke>
                     <label class="flex items-center gap-3 cursor-pointer select-none">
                         <input type="checkbox" class="sr-only" />
@@ -157,6 +162,11 @@
                             Smoke break?
                         </span>
                     </label>
+                </div>
+                <div class="mt-3 hover:cursor-pointer text-right">
+                    <button type="button" data-template-save
+                        class="text-neutral font-sec underline underline-offset-2 decoration-accents ">Save
+                        template</button>
                 </div>
             </div>
 
@@ -181,11 +191,16 @@
                            hover:bg-neutral transition-colors duration-300">
                             Add
                         </button>
+                        <button type="button" class="my-auto flex gap-1">
+                            <i class="fa-solid fa-folder-open" style="color: #1C2317;">
+                            </i>
+                            <i class="fa-solid fa-caret-down" style="color: #1C2317;"></i>
+                        </button>
                     </form>
                 </div>
 
                 <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
-
+                <hr class="mt-4 border-1 w-[75%] mx-auto border-b border-main/40 rounded-full" />
                 <div class="mt-4" data-smoke>
                     <!-- same smoke block as above -->
                     <label class="flex items-center gap-3 cursor-pointer select-none">
@@ -203,6 +218,11 @@
                             Smoke break?
                         </span>
                     </label>
+                </div>
+                <div class="mt-3 hover:cursor-pointer text-right">
+                    <button type="button" data-template-save
+                        class="text-neutral font-sec underline underline-offset-2 decoration-accents ">Save
+                        template</button>
                 </div>
             </div>
 
@@ -227,11 +247,16 @@
                            hover:bg-neutral transition-colors duration-300">
                             Add
                         </button>
+                        <button type="button" class="my-auto flex gap-1">
+                            <i class="fa-solid fa-folder-open" style="color: #1C2317;">
+                            </i>
+                            <i class="fa-solid fa-caret-down" style="color: #1C2317;"></i>
+                        </button>
                     </form>
                 </div>
 
                 <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
-
+                <hr class="mt-4 border-1 w-[75%] mx-auto border-b border-main/40 rounded-full" />
                 <div class="mt-4" data-smoke>
                     <!-- same smoke block -->
                     <label class="flex items-center gap-3 cursor-pointer select-none">
@@ -250,6 +275,11 @@
                         </span>
                     </label>
                 </div>
+                <div class="mt-3 hover:cursor-pointer text-right">
+                    <button type="button" data-template-save
+                        class="text-neutral font-sec underline underline-offset-2 decoration-accents ">Save
+                        template</button>
+                </div>
             </div>
         </section>
 
@@ -263,11 +293,12 @@
                             data-key="work">
                             <img src="images/work.png" alt="Work Image"
                                 class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
-                            <button
-                                class="absolute top-3 right-8 mt-3 text-neutral font-sec underline underline-offset-2 decoration-accents hover:cursor-pointer"
-                                data-clear-checked type="button" aria-label="Clear checked (Work)">
-                                Clear checked
-                            </button>
+                            <div class="mt-3 hover:cursor-pointer text-right">
+                                <button class="text-neutral font-sec underline underline-offset-2 decoration-accents"
+                                    data-clear-checked type="button" aria-label="Clear checked (Work)">
+                                    Clear checked
+                                </button>
+                            </div>
                             <div class="mt-8">
                                 <form class="flex justify-between" data-checklist-form>
                                     <div class="flex flex-col">
@@ -288,11 +319,12 @@
                             data-key="home">
                             <img src="images/house.png" alt="House Image"
                                 class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
-                            <button
-                                class="absolute top-3 right-8 mt-3 text-neutral font-sec underline underline-offset-2 decoration-accents hover:cursor-pointer"
-                                data-clear-checked type="button" aria-label="Clear checked (House)">
-                                Clear checked
-                            </button>
+                            <div class="mt-3 hover:cursor-pointer text-right">
+                                <button class="text-neutral font-sec underline underline-offset-2 decoration-accents"
+                                    data-clear-checked type="button" aria-label="Clear checked (House)">
+                                    Clear checked
+                                </button>
+                            </div>
                             <div class="mt-8">
                                 <form class="flex justify-between" data-checklist-form>
                                     <div class="flex flex-col">
@@ -329,7 +361,8 @@
                             </div>
 
                             <!-- list-disc gives bullets; marker:text-main colors the bullets -->
-                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list>
+                            </ul>
                         </div>
 
                     </div>
@@ -353,17 +386,19 @@
                             </div>
 
                             <!-- list-disc gives bullets; marker:text-main colors the bullets -->
-                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list>
+                            </ul>
                         </div>
                         <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
                             data-key="shopping">
                             <img src="images/cart.png" alt="Food Image"
                                 class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
-                            <button
-                                class="absolute top-3 right-8 mt-3 text-neutral font-sec underline underline-offset-2 decoration-accents hover:cursor-pointer"
-                                data-clear-checked type="button" aria-label="Clear checked (Shopping)">
-                                Clear checked
-                            </button>
+                            <div class="mt-3 hover:cursor-pointer text-right">
+                                <button class="text-neutral font-sec underline underline-offset-2 decoration-accents"
+                                    data-clear-checked type="button" aria-label="Clear checked (Shopping)">
+                                    Clear checked
+                                </button>
+                            </div>
                             <div class="mt-8">
                                 <form class="flex justify-between" data-checklist-form>
                                     <div class="flex flex-col">

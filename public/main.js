@@ -63,6 +63,12 @@ function loadJSON(key, fallback) {
 function saveJSON(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
+// --- Global checklist templates ---
+const TPL_KEY = "planner:templates:v1";
+const readTemplates = () => loadJSON(TPL_KEY, {});
+const saveTemplates = (obj) => saveJSON(TPL_KEY, obj);
+
+
 const _norm = (s) => (s || "").trim().toLowerCase();
 
 /* -------- File System Access + IndexedDB handle storage -------- */
@@ -139,6 +145,50 @@ function saveViaHref(filename, obj) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
 }
+
+// Build export payload for a given day offset (0=today, 1=tomorrow)
+function buildExport(offset) {
+  const ds = ymd(getPlannerDate(offset));
+  let dayObj, bullets;
+
+  if (offset === DAY_OFFSET) {
+    // Export from the current page's DOM
+    dayObj = collectChecklistsFromDOM();
+    dayObj.__smokes = getSmokesCountFromDOM();
+    const stored = loadJSON(dayKey(offset), {}) || {};
+    mergeClearedIntoDayObj(dayObj, stored.__clearedDone);
+    bullets = collectBulletsFromDOM();
+  } else {
+    // Export from storage for a non-active day
+    dayObj = loadJSON(dayKey(offset), {}) || {};
+    bullets = {};
+    const prefix = `${dayKeyFromDateStr(ds)}:bullets:`;
+    Object.keys(localStorage).forEach((k) => {
+      if (k.startsWith(prefix)) {
+        const listKey = k.slice(prefix.length);
+        bullets[listKey] = { type: "bullets", items: loadJSON(k, []) };
+      }
+    });
+  }
+
+  return {
+    filename: `${ds}-planner.json`,
+    payload: {
+      version: 2,
+      date: ds,
+      day: dayObj,
+      bullets,
+      notes: loadJSON(GLOBAL_NOTES_KEY, []),
+    },
+  };
+}
+
+// Reuse the same download interaction as the buttons
+function downloadDayViaHref(offset) {
+  const { filename, payload } = buildExport(offset);
+  saveViaHref(filename, payload);
+}
+
 async function downloadJSON(filename, obj) {
   const dir = await ensureDirHandle();
   if (dir) {
@@ -363,6 +413,86 @@ function wireChecklist(root) {
   const cardKey = root.dataset.key || "card";
   let id = 0;
   let suppressSave = false;
+
+  // --- Templates: use the pre-rendered folder button ---
+  const toggleIcon = form.querySelector('button[type="button"] i.fa-folder-open');
+  const toggle = toggleIcon ? toggleIcon.closest('button') : null;
+
+  if (toggle) {
+    // wrap the toggle so the menu can be absolutely positioned
+    const wrap = el("div", "relative");
+    toggle.replaceWith(wrap);
+    wrap.appendChild(toggle);
+
+    const menu = el("div", "absolute right-0 top-full mt-1 w-64 font-sec bg-neutral border-neutral border-1 rounded-lg shadow-lg hidden z-20");
+
+    wrap.appendChild(menu);
+
+    function applyTemplate(items, preserveDone) {
+      const have = new Set(
+        [...list.querySelectorAll('[data-role="label"]')]
+          .map(n => (n.textContent || "").trim().toLowerCase())
+      );
+      suppressSave = true;
+      (items || []).forEach(it => {
+        const text = capFirst(typeof it === "string" ? it : (it?.text || ""));
+        if (!text) return;
+        const n = text.toLowerCase();
+        if (have.has(n)) return;
+        addItem(text, preserveDone && !!it?.done);
+        have.add(n);
+      });
+      suppressSave = false;
+      snapshotDay();
+    }
+
+    function rebuildMenu() {
+      const tpls = readTemplates();
+      menu.innerHTML = "";
+      const names = Object.keys(tpls).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      names.forEach(name => {
+        const b = el("button", "block w-full text-left px-3 pt-4 pb-2 text-white hover:bg-white hover:text-neutral focus:bg-white focus:text-neutral", name);
+        b.type = "button";
+        b.addEventListener("click", (e) => {
+          // Alt/Option or Cmd preserves done-state
+          applyTemplate(tpls[name], e.altKey || e.metaKey);
+          menu.classList.add("hidden");
+          input.focus();
+        });
+        menu.appendChild(b);
+      });
+      if (!names.length) menu.classList.add("hidden");
+    }
+
+    toggle.addEventListener("click", () => { rebuildMenu(); menu.classList.toggle("hidden"); });
+    document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) menu.classList.add("hidden"); });
+    toggle.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.add("hidden"); });
+    document.addEventListener("templates:changed", rebuildMenu);
+  }
+
+
+  // Save template button (attribute only)
+  const saveBtn = root.querySelector("[data-template-save]");
+  if (saveBtn) {
+    saveBtn.type = "button";
+    saveBtn.addEventListener("click", () => {
+      const name = (prompt("Template name?") || "").trim();
+      if (!name) return;
+
+      const items = [...root.querySelectorAll("[data-checklist-list] > li")].map(li => {
+        const label = li.querySelector('[data-role="label"]');
+        const cb = li.querySelector('input[type="checkbox"]');
+        return { text: (label?.textContent || "").trim(), done: !!cb?.checked };
+      }).filter(it => it.text);
+
+      if (!items.length) { alert("No items to save."); return; }
+
+      const store = readTemplates();
+      store[name] = items;
+      saveTemplates(store);
+      document.dispatchEvent(new CustomEvent("templates:changed"));
+    });
+  }
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -954,25 +1084,11 @@ document.addEventListener("DOMContentLoaded", () => {
   highlightCurrentBlock();
   setInterval(highlightCurrentBlock, 5 * 60 * 1000);
 
-  // Download today (DOM snapshot + archived-cleared)
+  // Download the current view's day (works on today and on tomorrow.html)
   document.getElementById("download-today")?.addEventListener("click", () => {
-    const ds = ymd(getPlannerDate(DAY_OFFSET));
-    const dayObj = collectChecklistsFromDOM();
-    dayObj.__smokes = getSmokesCountFromDOM();
-
-    // merge archived cleared-done (from storage) into the export
-    const stored = loadJSON(dayKey(DAY_OFFSET), {}) || {};
-    mergeClearedIntoDayObj(dayObj, stored.__clearedDone);
-
-    const payload = {
-      version: 2,
-      date: ds,
-      day: dayObj,
-      bullets: collectBulletsFromDOM(),
-      notes: loadJSON(GLOBAL_NOTES_KEY, []),
-    };
-    saveViaHref(`${ds}-planner.json`, payload);
+    downloadDayViaHref(DAY_OFFSET);
   });
+
 
 
   // Restore from JSON (opens remembered folder if supported)
