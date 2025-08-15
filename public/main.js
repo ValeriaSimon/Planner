@@ -277,6 +277,24 @@ const TIME_KEYS = ["morning", "daytime", "evening"];
 const DEFAULT_END = { morning: 14, daytime: 18, evening: 22 };
 const COLLAPSE_SCALE = 0.6;
 
+const MANUAL_COLLAPSE_KEY = "__manualCollapsed";
+function getManualMap() {
+  const d = loadJSON(dayKey(), {}) || {};
+  return d[MANUAL_COLLAPSE_KEY] || {};
+}
+function isManualCollapsed(key) {
+  return !!getManualMap()[key];
+}
+function setManualCollapsed(key, val) {
+  const k = dayKey();
+  const d = loadJSON(k, {}) || {};
+  const m = d[MANUAL_COLLAPSE_KEY] || {};
+  if (val) m[key] = true; else delete m[key];
+  d[MANUAL_COLLAPSE_KEY] = m;
+  saveJSON(k, d);
+}
+
+
 function cardEndHour(key) {
   const v = getCardBoundary(key, "end");
   return Number.isFinite(v) ? v : DEFAULT_END[key] ?? 24;
@@ -301,30 +319,6 @@ function renderCardFromStorage(key) {
   }
 }
 
-function applyCollapsedUI(key, collapsed) {
-  const card = document.querySelector(`[data-checklist][data-key="${key}"]`);
-  if (!card) return;
-  const list = card.querySelector("[data-checklist-list]");
-  const form = card.querySelector("[data-checklist-form]");
-  const smoke = card.querySelector("[data-smoke]");
-
-  if (collapsed) {
-    list?.classList.add("hidden");
-    form?.classList.add("hidden");
-    smoke?.classList.add("hidden");
-    card.setAttribute("data-collapsed", "1");
-    // visual collapse: keep colors, just scale
-    card.style.transformOrigin = "top left";
-    card.style.transform = `scale(${COLLAPSE_SCALE})`;
-    card.style.transition = "transform 200ms ease";
-  } else {
-    list?.classList.remove("hidden");
-    form?.classList.remove("hidden");
-    smoke?.classList.remove("hidden");
-    card.removeAttribute("data-collapsed");
-    card.style.transform = "";
-  }
-}
 
 // Sync tomorrow from today. mode: "time" = TIME_KEYS only, "all" = all checklist keys
 function syncTomorrowFromToday(mode = "time") {
@@ -456,7 +450,7 @@ function wireChecklist(root) {
 
   if (toggle) {
     // wrap the toggle so the menu can be absolutely positioned
-    const wrap = el("div", "relative");
+    const wrap = el("div", "relative inline-flex items-center my-auto");
     toggle.replaceWith(wrap);
     wrap.appendChild(toggle);
 
@@ -505,7 +499,6 @@ function wireChecklist(root) {
     toggle.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.add("hidden"); });
     document.addEventListener("templates:changed", rebuildMenu);
   }
-
 
   // Save template button (attribute only)
   const saveBtn = root.querySelector("[data-template-save]");
@@ -612,7 +605,10 @@ function wireChecklist(root) {
       label.addEventListener("blur", commit);
     });
 
-    del.addEventListener("click", () => { li.remove(); if (!suppressSave) snapshotDay(); });
+    del.addEventListener("click", () => {
+      li.remove();
+      if (!suppressSave) snapshotDay();
+    });
 
     li.addEventListener("dragstart", (e) => {
       const t = e.target;
@@ -807,6 +803,104 @@ function wireSmoke(container) {
   });
 }
 
+/* -------- Caret UI helper (shared) -------- */
+function applyCollapsedUI(key, collapsed) {
+  const card =
+    document.querySelector(`[data-checklist][data-key="${key}"]`) ||
+    document.querySelector(`[data-bullets][data-key="${key}"]`);
+  if (!card) return;
+
+  if (collapsed) card.setAttribute("data-collapsed", "1");
+  else card.removeAttribute("data-collapsed");
+
+  // toggle main content
+  const list = card.querySelector("[data-checklist-list],[data-bullets-list]");
+  const form = card.querySelector("[data-checklist-form],[data-bullets-form]");
+  // NOTE: clear button visibility is handled by updateClearCheckedVisibility()
+  if (list) list.classList.toggle("hidden", collapsed);
+  if (form) form.classList.toggle("hidden", collapsed);
+
+  // flip caret icon
+  const icon = card.querySelector("i.fa-caret-up, i.fa-caret-down");
+  if (icon) {
+    icon.classList.toggle("fa-caret-up", !collapsed);
+    icon.classList.toggle("fa-caret-down", collapsed);
+  }
+}
+
+/* -------- Clear Checked buttons: independent wiring -------- */
+function wireClearButtons() {
+  document.querySelectorAll("[data-clear-checked]").forEach(wireClearButton);
+}
+
+function wireClearButton(btn) {
+  const card = btn.closest("[data-checklist][data-key]");
+  if (!card) return;
+  const list = card.querySelector("[data-checklist-list]");
+
+  const update = () => {
+    if (card.hasAttribute("data-collapsed")) { btn.classList.add("hidden"); return; }
+    const anyChecked = !!list?.querySelector('input[type="checkbox"]:checked');
+    btn.classList.toggle("hidden", !anyChecked);
+  };
+
+  // initial state
+  update();
+
+  // listen for checkbox changes
+  if (list) {
+    list.addEventListener("change", (e) => {
+      if (e.target && e.target.matches('input[type="checkbox"]')) update();
+    });
+    // observe add/remove of items
+    const mo = new MutationObserver(update);
+    mo.observe(list, { childList: true, subtree: true });
+  }
+
+  // observe collapse state on the card
+  const co = new MutationObserver(update);
+  co.observe(card, { attributes: true, attributeFilter: ["data-collapsed"] });
+}
+
+
+/* -------- Carets: one place, all cards (checklist + bullets) -------- */
+function wireCarets() {
+  // Ensure every card has a caret and apply manual state for non-time cards.
+  document.querySelectorAll("[data-checklist],[data-bullets]").forEach((card) => {
+    const key = ensureCardKey(card);
+    if (!TIME_KEYS.includes(key)) {
+      // restore manual collapsed state on load
+      applyCollapsedUI(key, isManualCollapsed(key));
+    }
+    // ensure a caret exists
+    let icon = card.querySelector("i.fa-caret-up, i.fa-caret-down");
+    if (!icon) {
+      const holder = el("div", "text-right");
+      const btn = el("button", "");
+      btn.type = "button";
+      icon = el("i", "fa-solid fa-caret-up text-neutral scale-250 hover:cursor-pointer");
+      btn.appendChild(icon);
+      holder.appendChild(btn);
+      const header = card.querySelector(".flex.justify-between");
+      if (header) header.before(holder); else card.prepend(holder);
+    }
+  });
+
+  // Single delegated click handler for all carets on the page.
+  document.addEventListener("click", (e) => {
+    const icon = e.target.closest("i.fa-caret-up, i.fa-caret-down");
+    if (!icon) return;
+
+    const card = icon.closest("[data-checklist],[data-bullets]");
+    if (!card) return;
+
+    const key = ensureCardKey(card);
+    const next = !card.hasAttribute("data-collapsed");
+    setManualCollapsed(key, next);
+    applyCollapsedUI(key, next);
+  });
+}
+
 /* -------- Restore current page from storage to DOM -------- */
 function restoreAll() {
   const dayData = loadJSON(dayKey(), {});
@@ -967,9 +1061,10 @@ function collapsePastTimeCards() {
   for (let i = 0; i < TIME_KEYS.length; i++) {
     const fromKey = TIME_KEYS[i];
     const toKey = TIME_KEYS[i + 1]; // undefined for evening
+    const manual = !!(data.__manualCollapsed && data.__manualCollapsed[fromKey]);
     const shouldCollapse = new Date().getHours() >= cardEndHour(fromKey);
+    applyCollapsedUI(fromKey, shouldCollapse || manual);
 
-    applyCollapsedUI(fromKey, shouldCollapse);
 
     if (shouldCollapse && !data.__collapsed[fromKey] && toKey) {
       const from = (data[fromKey]?.items) ? data[fromKey] : (data[fromKey] = { type: "checklist", items: [], smoke: false });
@@ -1116,6 +1211,17 @@ function onEndDay() {
   }, NAV_DELAY_MS);
 }
 
+function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
+function ensureCardKey(card) {
+  let k = card.dataset.key;
+  if (!k) {
+    const title = card.querySelector("h3,[data-title]")?.textContent?.trim() || "card";
+    const idx = Array.from(document.querySelectorAll("[data-checklist]")).indexOf(card);
+    k = `card-${idx}-${slugify(title)}`;
+    card.dataset.key = k;
+  }
+  return k;
+}
 
 /* -------- Boot -------- */
 document.addEventListener("DOMContentLoaded", () => {
@@ -1125,12 +1231,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-checklist]").forEach(wireChecklist);
   document.querySelectorAll("[data-bullets]").forEach(wireBullets);
   document.querySelectorAll("[data-countdown]").forEach(wireCountdown);
+  wireCarets(); // new
 
+  wireClearButtons();               // NEW
   wireClearChecked();
   if (DAY_OFFSET === 1) syncTomorrowFromToday("all");
   restoreAll();
   collapsePastTimeCards();
-  setInterval(collapsePastTimeCards, 5 * 60 * 1000); // every 5 minutes
+  setInterval(collapsePastTimeCards, 5 * 60 * 1000);
 
   if (DAY_OFFSET === 0) ensureEmptyDay(1);
   highlightCurrentBlock();
@@ -1141,6 +1249,7 @@ document.addEventListener("DOMContentLoaded", () => {
     snapshotDay();
   });
 
+  // Single handler for page-level actions only
   document.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
@@ -1150,6 +1259,6 @@ document.addEventListener("DOMContentLoaded", () => {
     else if (act === "restore") onRestore();
     else if (act === "endday") onEndDay();
   });
-
-
 });
+
+
