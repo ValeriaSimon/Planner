@@ -196,9 +196,10 @@ function getCardBoundary(key, which) {
   return Number.isFinite(v) ? v : null;
 }
 
-// Title-case helper
-function capWords(s) {
-  return String(s).replace(/(^|[\s\-\/])([^\s\-\/])/g, (m, sep, ch) => sep + ch.toLocaleUpperCase());
+// Capitalize only first character of the first word
+function capFirst(s) {
+  s = String(s).trim();
+  return s ? s[0].toLocaleUpperCase() + s.slice(1) : s;
 }
 
 /* --- inline edit + reorder helpers --- */
@@ -216,7 +217,6 @@ function placeCaretEnd(el) {
 const TIME_KEYS = ["morning", "daytime", "evening"];
 const DEFAULT_END = { morning: 14, daytime: 18, evening: 22 };
 const COLLAPSE_SCALE = 0.6;
-
 
 function cardEndHour(key) {
   const v = getCardBoundary(key, "end");
@@ -267,8 +267,6 @@ function applyCollapsedUI(key, collapsed) {
   }
 }
 
-
-
 function refreshTomorrowPreviewAfterTodayChange() {
   const todayData = loadJSON(dayKey(0), {}) || {};
   const tKey = dayKey(1);
@@ -317,7 +315,6 @@ function setSmokesCount(n) {
   if (el) el.textContent = String(n);
 }
 
-
 /* -------- Greeting + titles -------- */
 function updateGreeting() {
   const h1 = document.getElementById("greeting") || document.querySelector("h1");
@@ -363,7 +360,7 @@ function wireChecklist(root) {
   const list = root.querySelector("[data-checklist-list]");
   if (!form || !input || !list) return;
 
-  const cardKey = root.dataset.key || "card";     // <-- scope
+  const cardKey = root.dataset.key || "card";
   let id = 0;
   let suppressSave = false;
 
@@ -373,13 +370,13 @@ function wireChecklist(root) {
     input.value = "";
   });
 
-  input.addEventListener("blur", () => { input.value = capWords(input.value); });
+  input.addEventListener("blur", () => { input.value = capFirst(input.value); });
 
   function addItemsFrom(text) {
     text.split(/[\n,;]+/)
       .map((s) => s.trim())
       .filter(Boolean)
-      .forEach((t) => addItem(capWords(t)));
+      .forEach((t) => addItem(capFirst(t)));
   }
 
   function addItem(labelText, done = false, restoring = false) {
@@ -396,20 +393,16 @@ function wireChecklist(root) {
     const label = el("span", "flex-1 text-accents font-bold tracking-wide text-xl font-sec decoration-main decoration-2 mt-3", labelText);
     label.setAttribute("data-role", "label");
 
-    // edit button
     const edit = el("button", "px-2 py-1 rounded-md text-accents/80 hover:text-white hover:bg-neutral transition-colors", "✎");
     edit.type = "button"; edit.title = "Edit";
 
-    // delete button
     const del = el("button", "px-2 py-1 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors", "✕");
     del.type = "button"; del.title = "Remove";
 
-    // drag handle
     const handle = el("span", "ml-1 cursor-grab select-none text-accents/60", "⋮⋮");
     handle.setAttribute("data-handle", "1");
     li.draggable = true;
 
-    // checkbox change
     cb.addEventListener("change", () => {
       const checked = cb.checked;
       label.classList.toggle("line-through", checked);
@@ -420,15 +413,13 @@ function wireChecklist(root) {
       if (!suppressSave) snapshotDay();
     });
 
-    // edit mode
     edit.addEventListener("click", () => {
       if (label.isContentEditable) return;
       var original = label.textContent;
       label.contentEditable = "true";
       label.style.outline = "none";
-      row.removeAttribute("for"); // don’t toggle checkbox while editing
+      row.removeAttribute("for");
       label.focus(); placeCaretEnd(label);
-
 
       function commit() {
         label.textContent = (label.textContent || "").trim();
@@ -455,10 +446,8 @@ function wireChecklist(root) {
       label.addEventListener("blur", commit);
     });
 
-    // delete
     del.addEventListener("click", () => { li.remove(); if (!suppressSave) snapshotDay(); });
 
-    // DnD reorder (drag from anywhere unless editing or clicking controls)
     li.addEventListener("dragstart", (e) => {
       const t = e.target;
       if (label.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
@@ -492,18 +481,16 @@ function wireChecklist(root) {
     if (!restoring) snapshotDay();
   }
 
-
   root.__addChecklistItem = (text, done = false, restoring = false) => addItem(text, done, restoring);
 
   const smoke = root.querySelector("[data-smoke]");
   if (smoke) wireSmoke(smoke);
 }
 
-
 const smokescountPlus = document.getElementById("smokescount-plus");
 smokescountPlus?.addEventListener("click", () => {
   setSmokesCount(getSmokesCountFromDOM() + 1);
-  snapshotDay(); // persist with the day
+  snapshotDay();
 });
 
 /* -------- Bullets (global Notes vs day-scoped Food, etc.) -------- */
@@ -514,15 +501,13 @@ function wireBullets(root) {
   const key = root.dataset.key || "notes";
   if (!form || !input || !list) return;
 
-  // tolerant read/write
   function readItems() {
     const v = loadJSON(bulletsStorageKeyFor(key), []);
     if (Array.isArray(v)) return v;
-    if (v && typeof v === "object" && Array.isArray(v.items)) return v.items; // legacy {type:'bullets', items:[]}
+    if (v && typeof v === "object" && Array.isArray(v.items)) return v.items;
     return [];
   }
   function writeItems(items) {
-    // always persist as a plain array
     saveJSON(bulletsStorageKeyFor(key), items);
   }
   function currentItems() {
@@ -535,7 +520,7 @@ function wireBullets(root) {
     text.split(/[\n,;]+/)
       .map((s) => s.trim())
       .filter(Boolean)
-      .forEach((t) => addItem(capWords(t)));
+      .forEach((t) => addItem(capFirst(t)));
   }
 
   function addItem(text, restoring = false) {
@@ -554,7 +539,6 @@ function wireBullets(root) {
     handle.setAttribute("data-handle", "1");
     li.draggable = true;
 
-    // inline edit
     edit.addEventListener("click", () => {
       if (txt.isContentEditable) return;
       const original = txt.textContent;
@@ -577,10 +561,8 @@ function wireBullets(root) {
       txt.addEventListener("blur", commit);
     });
 
-    // delete
     del.addEventListener("click", () => { li.remove(); writeItems(currentItems()); });
 
-    // Drag from anywhere unless editing or clicking controls
     li.addEventListener("dragstart", (e) => {
       const t = e.target;
       if (txt.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
@@ -606,13 +588,9 @@ function wireBullets(root) {
     if (!restoring) writeItems(currentItems());
   }
 
-
-
-  // init
   list.innerHTML = "";
   readItems().forEach((it) => addItem(typeof it === "string" ? it : it.text, true));
 
-  // submit
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -621,11 +599,10 @@ function wireBullets(root) {
     input.focus();
   });
 
-  input.addEventListener("blur", () => { input.value = capWords(input.value); });
+  input.addEventListener("blur", () => { input.value = capFirst(input.value); });
 
   root.__addBulletItem = (text, restoring = false) => addItem(text, restoring);
 }
-
 
 /* -------- Smoke toggle -------- */
 function wireSmoke(container) {
@@ -634,13 +611,37 @@ function wireSmoke(container) {
   const icon = container.querySelector('[data-role="icon"]');
   const label = container.querySelector('[data-role="label"]');
   if (!cb || !box || !icon || !label) return;
+
+  const card = container.closest('[data-checklist][data-key]');
+  const cardKey = card?.dataset.key;
+
   cb.addEventListener("change", () => {
     const checked = cb.checked;
+
     label.classList.toggle("line-through", checked);
     icon.style.opacity = checked ? "1" : "0";
     icon.setAttribute("aria-hidden", checked ? "false" : "true");
     box.classList.toggle("border-main", !checked);
     box.classList.toggle("border-accents", checked);
+
+    if (cardKey) {
+      const k = dayKey();
+      const day = loadJSON(k, {}) || {};
+      const counted = day.__smokeCounted || {};
+      const wasCounted = !!counted[cardKey];
+
+      if (checked && !wasCounted) {
+        setSmokesCount(getSmokesCountFromDOM() + 1);
+        counted[cardKey] = true;
+      } else if (!checked && wasCounted) {
+        setSmokesCount(Math.max(0, getSmokesCountFromDOM() - 1));
+        counted[cardKey] = false;
+      }
+
+      day.__smokeCounted = counted;
+      saveJSON(k, day);
+    }
+
     snapshotDay();
   });
 }
@@ -672,7 +673,6 @@ function prefillTomorrowFromToday() {
     carryMap.forEach((orig, norm) => { if (!nativeSet.has(norm)) newCarriedItems.push({ text: orig, done: false }); });
 
     const nextItems = [...newCarriedItems, ...native];
-
     if (JSON.stringify(existing) !== JSON.stringify(nextItems)) {
       changed = true;
       if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
@@ -737,8 +737,9 @@ function snapshotDay() {
   const key = dayKey();
   const prev = loadJSON(key, {}) || {};
   const next = collectChecklistsFromDOM();
-  next.__smokes = getSmokesCountFromDOM();     // <- add counter
+  next.__smokes = getSmokesCountFromDOM();
   if (prev.__carried) next.__carried = prev.__carried;
+  if (prev.__smokeCounted) next.__smokeCounted = prev.__smokeCounted;
   saveJSON(key, next);
 }
 
@@ -780,7 +781,7 @@ function wireCountdown(root) {
   function showView() { form.classList.add('hidden'); view.classList.remove('hidden'); root.classList.add('is-view'); root.classList.remove('is-form'); }
 
   function pad(n) { return String(n).padStart(2, '0'); }
-  function formatDuration(ms) { let s = Math.max(0, Math.floor(ms / 1000)); const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60; return (d > 0 ? `${d}d ` : '') + `${pad(h)}:${pad(m)}:${pad(s)}`; }
+  function formatDuration(ms) { let s = Math.max(0, Math.floor(ms / 1000)); const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60; return (d > 0 ? `${d} D ` : '') + `${pad(h)}:${pad(m)}:${pad(s)}`; }
   function toLocalDatetimeValue(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 
   function update() {
@@ -861,11 +862,10 @@ function collapsePastTimeCards() {
 
   if (moved) {
     saveJSON(key, data);
-    TIME_KEYS.forEach(renderCardFromStorage);       // re-render affected cards
-    refreshTomorrowPreviewAfterTodayChange();       // keep tomorrow in sync
+    TIME_KEYS.forEach(renderCardFromStorage);
+    refreshTomorrowPreviewAfterTodayChange();
   }
 }
-
 
 /* -------- Boot -------- */
 document.addEventListener("DOMContentLoaded", () => {
@@ -880,7 +880,6 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreAll();
   collapsePastTimeCards();
   setInterval(collapsePastTimeCards, 5 * 60 * 1000); // every 5 minutes
-
 
   if (DAY_OFFSET === 0) ensureEmptyDay(1);
   highlightCurrentBlock();
@@ -898,10 +897,8 @@ document.addEventListener("DOMContentLoaded", () => {
       bullets: collectBulletsFromDOM(),
       notes: loadJSON(GLOBAL_NOTES_KEY, []),
     };
-    saveViaHref(`${ds}-planner.json`, payload); // no FS API, just blob download
+    saveViaHref(`${ds}-planner.json`, payload);
   });
-
-
 
   // Restore from JSON (opens remembered folder if supported)
   document.getElementById("restore")?.addEventListener("click", async () => {
@@ -910,7 +907,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const text = await file.text();
       const data = JSON.parse(text);
 
-      // Accept v1/v2 shapes
       const ds = data.date || (file.name.match(/^(\d{4}-\d{2}-\d{2})-planner\.json$/)?.[1]) || ymd(getPlannerDate(DAY_OFFSET));
       const dKey = dayKeyFromDateStr(ds);
 
@@ -932,12 +928,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // End day: carry unfinished, auto-download today & tomorrow, advance base day
+  // End day
   document.getElementById("endday")?.addEventListener("click", async () => {
     const todayKey = dayKey(0);
     const tomorrowKey = dayKey(1);
 
-    // Ensure tomorrow exists
     ensureEmptyDay(1);
 
     const todayData = loadJSON(todayKey, {}) || {};
@@ -951,7 +946,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!tomorrowData[key]) {
           tomorrowData[key] = { type: "checklist", items: [], smoke: false };
         }
-        // Prepend carry-overs
         tomorrowData[key].items = [...carry, ...(tomorrowData[key].items || [])];
         if (carry.length) {
           carriedMeta[key] = carry.map((it) => _norm(it.text)).filter(Boolean);
@@ -961,7 +955,6 @@ document.addEventListener("DOMContentLoaded", () => {
     tomorrowData.__carried = carriedMeta;
     saveJSON(tomorrowKey, tomorrowData);
 
-    // Build downloads from DOM snapshot to capture unsaved edits
     const dsToday = ymd(getPlannerDate(0));
     const dsTomorrow = ymd(getPlannerDate(1));
     const dayToday = collectChecklistsFromDOM();
@@ -973,8 +966,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bullets: collectBulletsFromDOM(),
       notes: loadJSON(GLOBAL_NOTES_KEY, []),
     };
-    // Tomorrow payload from storage (no DOM yet)
-    const tomorrowBullets = {}; // day-scoped bullets (e.g., food)
+    const tomorrowBullets = {};
     Object.keys(localStorage).forEach((k) => {
       const m = k.match(/^planner:\d{4}-\d{2}-\d{2}:bullets:(.+)$/);
       if (m && k.startsWith(dayKeyFromDateStr(dsTomorrow))) {
@@ -987,7 +979,6 @@ document.addEventListener("DOMContentLoaded", () => {
     await downloadJSON(`${dsToday}-planner.json`, payloadToday);
     await downloadJSON(`${dsTomorrow}-planner.json`, payloadTomorrow);
 
-    // Advance base day and reload to Today
     const newBase = getPlannerDate(1);
     setBaseDate(newBase);
     location.href = "./index.html";
