@@ -455,7 +455,6 @@ function wireChecklist(root) {
     wrap.appendChild(toggle);
 
     const menu = el("div", "absolute right-0 top-full mt-1 w-64 font-sec bg-neutral border-neutral border-1 rounded-lg shadow-lg hidden z-20");
-
     wrap.appendChild(menu);
 
     function applyTemplate(items, preserveDone) {
@@ -476,30 +475,73 @@ function wireChecklist(root) {
       snapshotDay();
     }
 
+    // cleaner: hide with [hidden] so Tailwind enforces display:none !important
+    function hasTemplates() { return Object.keys(readTemplates()).length > 0; }
+    function updateTemplateToggle() {
+      wrap.hidden = !hasTemplates();
+      if (wrap.hidden) menu.classList.add("hidden");
+    }
+
+    // build rows once per open; delegate clicks
     function rebuildMenu() {
       const tpls = readTemplates();
       menu.innerHTML = "";
-      const names = Object.keys(tpls).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+      const names = Object.keys(tpls).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" })
+      );
+
       names.forEach(name => {
-        const b = el("button", "block w-full text-left px-3 pt-4 pb-2 text-white hover:bg-white hover:text-neutral focus:bg-white focus:text-neutral", name);
-        b.type = "button";
-        b.addEventListener("click", (e) => {
-          // Alt/Option or Cmd preserves done-state
-          applyTemplate(tpls[name], e.altKey || e.metaKey);
-          menu.classList.add("hidden");
-          input.focus();
-        });
-        menu.appendChild(b);
+        const row = el("div",
+          "flex items-center justify-between px-3 pt-4 pb-2 text-white hover:bg-white hover:text-neutral focus:bg-white focus:text-neutral");
+
+        const applyBtn = el("button", "text-left flex-1", name);
+        applyBtn.type = "button";
+        applyBtn.dataset.action = "tpl-apply";
+        applyBtn.dataset.tpl = name;
+
+        const delBtn = el("button",
+          "ml-2 px-2 py-1 rounded-md text-red-400 hover:text-red-700 transition-colors");
+        delBtn.type = "button";
+        delBtn.setAttribute("aria-label", `Delete template ${name}`);
+        delBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        delBtn.dataset.action = "tpl-del";
+        delBtn.dataset.tpl = name;
+
+        row.append(applyBtn, delBtn);
+        menu.appendChild(row);
       });
+
       if (!names.length) menu.classList.add("hidden");
+      updateTemplateToggle();
     }
+
+    // single delegated handler
+    menu.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-action]");
+      if (!btn) return;
+      const name = btn.dataset.tpl;
+      if (btn.dataset.action === "tpl-apply") {
+        const tpls = readTemplates();
+        applyTemplate(tpls[name], e.altKey || e.metaKey);
+        menu.classList.add("hidden");
+        input.focus();
+      } else if (btn.dataset.action === "tpl-del") {
+        if (!confirm(`Delete template "${name}"?`)) return;
+        const store = readTemplates();
+        delete store[name];
+        saveTemplates(store);
+        document.dispatchEvent(new CustomEvent("templates:changed"));
+      }
+    });
 
     toggle.addEventListener("click", () => { rebuildMenu(); menu.classList.toggle("hidden"); });
     document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) menu.classList.add("hidden"); });
     toggle.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.add("hidden"); });
-    document.addEventListener("templates:changed", rebuildMenu);
-  }
 
+    document.addEventListener("templates:changed", () => { rebuildMenu(); updateTemplateToggle(); });
+    updateTemplateToggle();
+  }
   // Save template button (attribute only)
   const saveBtn = root.querySelector("[data-template-save]");
   if (saveBtn) {
@@ -821,12 +863,13 @@ function applyCollapsedUI(key, collapsed) {
   if (form) form.classList.toggle("hidden", collapsed);
 
   // flip caret icon
-  const icon = card.querySelector("i.fa-caret-up, i.fa-caret-down");
+  const icon = card.querySelector("i.collapseCaret");
   if (icon) {
     icon.classList.toggle("fa-caret-up", !collapsed);
     icon.classList.toggle("fa-caret-down", collapsed);
   }
 }
+
 
 /* -------- Clear Checked buttons: independent wiring -------- */
 function wireClearButtons() {
@@ -873,12 +916,13 @@ function wireCarets() {
       applyCollapsedUI(key, isManualCollapsed(key));
     }
     // ensure a caret exists
-    let icon = card.querySelector("i.fa-caret-up, i.fa-caret-down");
+    let icon = card.querySelector("i.collapseCaret");
     if (!icon) {
       const holder = el("div", "text-right");
       const btn = el("button", "");
       btn.type = "button";
-      icon = el("i", "fa-solid fa-caret-up text-neutral scale-250 hover:cursor-pointer");
+      // add collapseCaret to the created icon
+      icon = el("i", "fa-solid fa-caret-up collapseCaret text-neutral scale-250 hover:cursor-pointer");
       btn.appendChild(icon);
       holder.appendChild(btn);
       const header = card.querySelector(".flex.justify-between");
@@ -888,7 +932,7 @@ function wireCarets() {
 
   // Single delegated click handler for all carets on the page.
   document.addEventListener("click", (e) => {
-    const icon = e.target.closest("i.fa-caret-up, i.fa-caret-down");
+    const icon = e.target.closest("i.collapseCaret");
     if (!icon) return;
 
     const card = icon.closest("[data-checklist],[data-bullets]");
@@ -899,6 +943,7 @@ function wireCarets() {
     setManualCollapsed(key, next);
     applyCollapsedUI(key, next);
   });
+
 }
 
 /* -------- Restore current page from storage to DOM -------- */
