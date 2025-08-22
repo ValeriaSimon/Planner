@@ -7,6 +7,8 @@ function getPageOffset() {
 }
 const DAY_OFFSET = getPageOffset();
 const NAV_DELAY_MS = 350;
+let ENDING_DAY = false;
+
 
 /* -------- Date helpers -------- */
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -115,10 +117,18 @@ const saveTemplates = (obj) => saveJSON(TPL_KEY, obj);
 
 const _norm = (s) => (s || "").trim().toLowerCase();
 
+function carryKey(textOrItem, folder = undefined) {
+  // why: single source of truth for carry/dedupe identity
+  const t = typeof textOrItem === "object" ? textOrItem?.text : textOrItem;
+  const f = typeof textOrItem === "object" ? textOrItem?.folder : folder;
+  return `${_norm(t || "")}@${String(f || "")}`;
+}
+
 /* -------- File System Access + IndexedDB handle storage -------- */
 const FS_DB = "plannerFS";
 const FS_STORE = "handles";
-const FS_KEYS = { DIR: "downloadDirHandle" };
+const FS_KEYS = { OPEN_START: "planner:lastOpenStartIn" };
+
 
 const idb = {
   put(key, val) {
@@ -200,28 +210,36 @@ async function pickFileFromRememberedDir() {
   let opts = {
     types: [{ description: "Planner JSON", accept: { "application/json": [".json"] } }],
     multiple: false,
+    excludeAcceptAllOption: true,
   };
 
-  // Try to start in the last used handle (Chromium File System Access API)
   if (window.showOpenFilePicker) {
     try {
-      const last = await idb.get(FS_KEYS.DIR); // stored FileSystemFileHandle
-      if (last) {
-        // Best-effort permission check; not strictly required for startIn
-        const p = await last.queryPermission?.({ mode: "read" });
-        if (p === "granted" || p === "prompt" || p == null) opts.startIn = last;
+      const last = await idb.get(FS_KEYS.OPEN_START); // may be a File or Directory handle
+      if (last?.queryPermission) {
+        let p = await last.queryPermission({ mode: "read" });
+        if (p === "prompt" && last.requestPermission) p = await last.requestPermission({ mode: "read" });
+        if (p === "granted" || p === "prompt") opts.startIn = last;
       }
-    } catch { /* noop */ }
+    } catch { /* ignore stale handle */ }
+
+    try {
+      const [h] = await window.showOpenFilePicker(opts);
+      try { await idb.put(FS_KEYS.OPEN_START, h); } catch { /* ignore persist failures */ }
+      return await h.getFile();
+    } catch (err) {
+      // Retry once without startIn if the stored handle is no longer valid
+      if (opts.startIn) {
+        delete opts.startIn;
+        const [h] = await window.showOpenFilePicker(opts);
+        try { await idb.put(FS_KEYS.OPEN_START, h); } catch { }
+        return await h.getFile();
+      }
+      throw err;
+    }
   }
 
-  if (window.showOpenFilePicker) {
-    const [h] = await window.showOpenFilePicker(opts);
-    // Remember this handle for next time
-    try { await idb.put(FS_KEYS.DIR, h); } catch { /* noop */ }
-    return await h.getFile();
-  }
-
-  // Fallback
+  // Fallback (no File System Access API)
   return new Promise((res, rej) => {
     const inp = document.createElement("input");
     inp.type = "file";
@@ -264,31 +282,31 @@ function capFirst(s) {
 }
 
 // Parse "Item text #folderA #folderB/sub". Everything before first "#" is the item.
-// Returns { text, folders: string[] } (normalized, deduped). Time cards pass isTimeCard=true to bypass.
+// Uses normalizeFolderPath for a single source of truth (drops "#unfiled", enforces caps).
 function parseItemAndTags(line, { isTimeCard = false } = {}) {
-  let s = String(line || "").trim();
+  const s = String(line || "").trim();
   if (!s) return { text: "", folders: [] };
-  if (isTimeCard) return { text: s, folders: [] }; // treat "#" as literal on time cards
+  if (isTimeCard) return { text: s, folders: [] };
 
   const i = s.indexOf("#");
   if (i < 0) return { text: s, folders: [] };
 
   const text = s.slice(0, i).trim();
-  const tags = s.slice(i)
-    .split(/(\s+)/)                      // keep simple splits
+
+  // delegate all tag cleanup to normalizeFolderPath
+  const raw = s.slice(i)
+    .split(/(\s+)/)
     .map(x => x.trim())
     .filter(Boolean)
     .filter(x => x.startsWith("#"))
-    .map(x => x.replace(/^#+/, ""))      // remove leading #
-    .map(x => x.replace(/\s+/g, "-"))    // collapse internal spaces -> "-"
-    .map(x => x.replace(/[^a-z0-9/_-]/gi, "")) // keep safe chars only
-    .map(x => x.toLowerCase())
+    .map(x => x.replace(/^#+/, ""));
+
+  const tags = raw
+    .map(normalizeFolderPath) // may return "" for unfiled
     .filter(Boolean);
 
-  // dedupe while preserving order
   const seen = new Set();
   const folders = tags.filter(t => (seen.has(t) ? false : (seen.add(t), true)));
-
   return { text, folders };
 }
 
@@ -298,49 +316,24 @@ const FOLDER_MAXLEN = 48;           // full path cap
 const ALLOWED_CHARS = /[^a-z0-9 _\-\/]/gi;  // allow letters, digits, space, _ - /
 const UNFILED_KEY = "";             // internal key for Unfiled
 
-// "Home Office/Remote" -> "Home Office / Remote"
+
+// Display a single, standalone folder name
 function displayFolder(path) {
   if (!path) return "Unfiled";
-  return path.split("/").map(seg =>
-    seg.replace(/[-_]+/g, " ").split(/\s+/).map(capFirst).join(" ")
-  ).join(" / ");
+  const s = String(path).replace(/[-_]+/g, " ").trim();
+  return s.split(/\s+/).map(capFirst).join(" ");
 }
 
-// normalize a raw tag -> "work/reports" (lowercase, spaces->- , allowed charset, cap length)
+// normalize a raw tag -> standalone folder (lowercase, spaces->- , allowed charset, cap length)
 function normalizeFolderPath(raw) {
   if (!raw) return UNFILED_KEY;
   let s = String(raw).replace(/^#+/, "").replace(ALLOWED_CHARS, " ").trim();
-  // split on "/", clean each seg
-  let segs = s.split("/").map(seg => {
-    seg = seg.trim().replace(/\s+/g, " ").toLowerCase();
-    seg = seg.replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^[-_]+|[-_]+$/g, "");
-    return seg;
-  }).filter(Boolean);
-  let path = segs.join("/");
-  if (!path || path === "unfiled") return UNFILED_KEY;
-  if (path.length > FOLDER_MAXLEN) path = path.slice(0, FOLDER_MAXLEN).replace(/\/+$/, "");
-  return path;
+  s = s.replace(/\s+/g, " ").toLowerCase();
+  s = s.replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^[-_]+|[-_]+$/g, "");
+  if (!s || s === "unfiled") return UNFILED_KEY;
+  if (s.length > FOLDER_MAXLEN) s = s.slice(0, FOLDER_MAXLEN);
+  return s;
 }
-
-// parse one input line -> { folders:[...], text }  (multiple #tags allowed; text is remainder)
-function parseLineTagsAndText(line) {
-  let folders = new Set();
-  // collect all #tags (start or after whitespace)
-  const rx = /(^|\s)#([a-z0-9 _\-\/]+)/gi;
-  let m, used = [];
-  while ((m = rx.exec(line))) {
-    const norm = normalizeFolderPath(m[2]);
-    folders.add(norm);
-    used.push({ i: m.index + m[1].length, len: m[0].length });
-  }
-  // remove tags from the line (from right to left so indexes stay valid)
-  let out = line;
-  used.sort((a, b) => b.i - a.i).forEach(u => { out = out.slice(0, u.i) + out.slice(u.i + u.len); });
-  const text = out.trim();
-  return { folders: [...folders], text };
-}
-
-
 
 /* --- inline edit + reorder helpers --- */
 let DRAG_SRC = null;
@@ -355,51 +348,71 @@ function placeCaretEnd(el) {
 
 // "-folderName" command => delete that folder
 function parseFolderDelete(line) {
-  const m = String(line || "").trim().match(/^-\s*([a-z0-9_-]+)\s*$/i);
+  const m = String(line || "").trim().match(/^-\s*([a-z0-9 _\-\/]+)\s*$/i);
   return m ? m[1].toLowerCase() : null;
 }
 
-// NEW: generic folder deletion for a given list
-function deleteFolderInList(list, cardKey, folder) {
-  const key = String(folder || "");
-  const headerSel = key ? `[data-folder-header="${key}"]` : `[data-folder-header="__none"]`;
-  const header = list.querySelector(headerSel);
-  if (!header) return 0;
+// Unified UI state under "__ui"
+const UI_STATE_KEY = "__ui";
 
-  // items currently in this folder
-  const moved = [...list.querySelectorAll(`li[data-folder="${key}"]`)];
+function readUI() {
+  const d = loadJSON(dayKey(), {}) || {};
+  return d[UI_STATE_KEY] || {};
+}
 
-  // Only ensure/create "Unfiled" if we actually have items to move
-  if (moved.length) {
-    let unfiledHeader = list.querySelector('[data-folder-header="__none"]');
-    if (!unfiledHeader) unfiledHeader = ensureFolderHeader(list, cardKey, "");
-    const insertAfter = unfiledHeader.nextSibling;
+function writeUI(next) {
+  const d = loadJSON(dayKey(), {}) || {};
+  d[UI_STATE_KEY] = next || {};
+  saveJSON(dayKey(), d);
+}
 
-    moved.forEach(li => {
-      li.setAttribute("data-folder", "");
-      list.insertBefore(li, insertAfter);
-    });
+// Back-compat migration of legacy keys → __ui
+function migrateUIState() {
+  const k = dayKey();
+  const d = loadJSON(k, {}) || {};
+  let ui = d[UI_STATE_KEY] || {};
+  let changed = false;
+
+  ui.folders = ui.folders || {};
+  ui.cards = ui.cards || {};
+  ui.cards.manual = ui.cards.manual || {};
+  ui.cards.auto = ui.cards.auto || {};
+
+  if (d.__foldersCollapsed) {
+    for (const [card, map] of Object.entries(d.__foldersCollapsed)) {
+      ui.folders[card] = Object.assign({}, ui.folders[card] || {}, map);
+    }
+    delete d.__foldersCollapsed;
+    changed = true;
+  }
+  if (d.__manualCollapsed) {
+    Object.assign(ui.cards.manual, d.__manualCollapsed);
+    delete d.__manualCollapsed;
+    changed = true;
+  }
+  if (d.__collapsed) {
+    Object.assign(ui.cards.auto, d.__collapsed);
+    delete d.__collapsed;
+    changed = true;
   }
 
-  // Remove the folder header and its stored collapsed state
-  header.remove();
-  const st = getCardFolderState(cardKey);
-  if (st && key in st) { delete st[key]; setCardFolderState(cardKey, st); }
-
-  updateFolderCounts(list);
-  return moved.length;
+  if (changed || !d[UI_STATE_KEY]) {
+    d[UI_STATE_KEY] = ui;
+    saveJSON(k, d);
+  }
 }
 
-
-function folderStateKey() { return "__foldersCollapsed"; }
-function readFoldersCollapsed() {
-  const d = loadJSON(dayKey(), {});
-  return d[folderStateKey()] || {};
+// Folder collapsed helpers (per card)
+function getCardFolderState(cardKey) {
+  const ui = readUI();
+  return (ui.folders && ui.folders[cardKey]) || {};
 }
-function writeFoldersCollapsed(map) {
-  const d = loadJSON(dayKey(), {});
-  d[folderStateKey()] = map || {};
-  saveJSON(dayKey(), d);
+
+function setCardFolderState(cardKey, next) {
+  const ui = readUI();
+  ui.folders = ui.folders || {};
+  ui.folders[cardKey] = next || {};
+  writeUI(ui);
 }
 
 // persisted headers per card so empty folders survive refresh
@@ -407,27 +420,17 @@ function folderHeadersKey() { return "__folderHeaders"; }
 
 function collectFolderHeadersFromDOM() {
   const out = {};
-  document.querySelectorAll("[data-checklist][data-key]").forEach(card => {
+  document.querySelectorAll("[data-checklist][data-key]").forEach((card) => {
     const key = card.dataset.key;
     const list = card.querySelector("[data-checklist-list]");
     const headers = list
-      ? [...list.querySelectorAll('li[data-folder-header]')].map(h =>
-        h.dataset.folderHeader === "__none" ? "" : h.dataset.folderHeader)
+      ? [...list.querySelectorAll('li[data-folder-header]')]
+        .map(h => (h.dataset.folderHeader === "__none" ? "" : h.dataset.folderHeader))
+        .filter(Boolean) // ignore Unfiled to keep it hidden-until-needed
       : [];
     out[key] = headers;
   });
   return out;
-}
-
-
-function getCardFolderState(cardKey) {
-  const all = readFoldersCollapsed();
-  return all[cardKey] || {};
-}
-function setCardFolderState(cardKey, next) {
-  const all = readFoldersCollapsed();
-  all[cardKey] = next || {};
-  writeFoldersCollapsed(all);
 }
 
 // create or return a header <li> for a folder inside a given list
@@ -530,7 +533,11 @@ function moveItemToFolder(li, destKey, cardKey, list) {
   // reinsert after that folder's header if present; else append
   const headerSel = destKey ? `[data-folder-header="${destKey}"]` : `[data-folder-header="__none"]`;
   const header = list.querySelector(headerSel);
-  if (header) list.insertBefore(li, header.nextSibling);
+  // append after last item in destination folder if any
+  const destItems = [...list.querySelectorAll(`li[data-folder="${destKey}"]`)];
+  const last = destItems.length ? destItems[destItems.length - 1] : null;
+  if (last) list.insertBefore(li, last.nextSibling);
+  else if (header) list.insertBefore(li, header.nextSibling);
   else list.appendChild(li);
 
   updateFolderCounts(list);
@@ -567,23 +574,21 @@ function deleteFolderCommand(list, cardKey, rawPath) {
 /* --- time-card collapse helpers --- */
 const TIME_KEYS = ["morning", "daytime", "evening"];
 const DEFAULT_END = { morning: 14, daytime: 18, evening: 22 };
-const COLLAPSE_SCALE = 0.6;
 
-const MANUAL_COLLAPSE_KEY = "__manualCollapsed";
+// Manual collapse per card via __ui.cards.manual
 function getManualMap() {
-  const d = loadJSON(dayKey(), {}) || {};
-  return d[MANUAL_COLLAPSE_KEY] || {};
+  const ui = readUI();
+  return (ui.cards && ui.cards.manual) || {};
 }
 function isManualCollapsed(key) {
   return !!getManualMap()[key];
 }
 function setManualCollapsed(key, val) {
-  const k = dayKey();
-  const d = loadJSON(k, {}) || {};
-  const m = d[MANUAL_COLLAPSE_KEY] || {};
-  if (val) m[key] = true; else delete m[key];
-  d[MANUAL_COLLAPSE_KEY] = m;
-  saveJSON(k, d);
+  const ui = readUI();
+  ui.cards = ui.cards || {};
+  ui.cards.manual = ui.cards.manual || {};
+  if (val) ui.cards.manual[key] = true; else delete ui.cards.manual[key];
+  writeUI(ui);
 }
 
 
@@ -592,61 +597,82 @@ function cardEndHour(key) {
   return Number.isFinite(v) ? v : DEFAULT_END[key] ?? 24;
 }
 
-function renderCardFromStorage(key) {
-  const card = document.querySelector(`[data-checklist][data-key="${key}"]`);
-  if (!card) return;
-  const list = card.querySelector("[data-checklist-list]");
-  if (!list) return;
-  list.innerHTML = "";
-  const dayData = loadJSON(dayKey(), {});
-  const entry = dayData[key];
-  if (entry?.items?.length) {
-    const add = card.__addChecklistItem;
-    entry.items.forEach((it) => add && add(it.text, !!it.done, true, it.folder || ""));
-  }
-  const smokeCb = card.querySelector('[data-smoke] input[type="checkbox"]');
-  if (smokeCb) {
-    smokeCb.checked = !!entry?.smoke;
-    smokeCb.dispatchEvent(new Event("change"));
-  }
-}
-
 
 // Sync tomorrow from today. 
 function syncTomorrowFromToday(mode = "time") {
-  const todayData = loadJSON(dayKey(0), {}) || {};
+  // precedence: use Today DOM when on Today page, else use stored Today
+  const todayFromDOM = (DAY_OFFSET === 0) ? collectChecklistsFromDOM() : null;
+  const todayData = todayFromDOM || loadJSON(dayKey(0), {}) || {};
+
   const tKey = dayKey(1);
   const tomorrowData = loadJSON(tKey, {}) || {};
   const prevCarriedMeta = tomorrowData.__carried || {};
   const newCarriedMeta = {};
   let changed = false;
 
+  const hdrKey = folderHeadersKey();
+  const todayHeaders = todayFromDOM ? collectFolderHeadersFromDOM()
+    : (todayData[hdrKey] || {});
+  const tomHeaders = tomorrowData[hdrKey] || {};
+  let headersChanged = false;
+
+
   const keys = mode === "all" ? Object.keys(todayData) : TIME_KEYS;
 
   keys.forEach((key) => {
     const entry = todayData[key];
     if (!entry || entry.type !== "checklist" || !Array.isArray(entry.items)) return;
-
+    const th = todayHeaders[key] || [];
+    if (th.length) {
+      const existing = tomHeaders[key] || [];
+      const merged = Array.from(new Set([...existing, ...th]));
+      if (existing.length !== merged.length || existing.some((v, i) => v !== merged[i])) {
+        tomHeaders[key] = merged;
+        headersChanged = true;
+      }
+    }
     // carry key = normText@folder
     const carryMap = new Map();
     entry.items.forEach((it) => {
       if (!it.done) {
-        const norm = _norm((it.text || ""));
-        const f = String(it.folder || "");
-        if (norm) carryMap.set(`${norm}@${f}`, { text: it.text, folder: f });
+        const k = carryKey(it);
+        if (k !== "@") carryMap.set(k, { text: it.text, folder: String(it.folder || "") });
       }
     });
     newCarriedMeta[key] = Array.from(carryMap.keys());
 
     const existing = (tomorrowData[key] && Array.isArray(tomorrowData[key].items)) ? tomorrowData[key].items : [];
-    const prevSet = new Set((prevCarriedMeta[key] || []));
-    const native = existing.filter((it) => !prevSet.has(`${_norm(it.text)}@${String(it.folder || "")}`));
 
-    const nativeSet = new Set(native.map((it) => `${_norm(it.text)}@${String(it.folder || "")}`));
+    // what was carried in the last sync
+    const prevArr = prevCarriedMeta[key] || [];
+    const prevSet = new Set(prevArr);
+
+    // Fallback bootstrap: if there’s no meta yet, treat any tomorrow item that
+    // also exists in today (same text@folder) as “previously carried” so we can
+    // remove it when it’s now done.
+    if (prevSet.size === 0 && existing.length) {
+      const todayAll = new Set((entry.items || []).map(it => carryKey(it)));
+      existing.map(it => carryKey(it)).forEach(k => { if (todayAll.has(k)) prevSet.add(k); });
+    }
+
+    const prevTextSet = new Set(Array.from(prevSet).map(k => k.split("@")[0]));
+
+    // items already in tomorrow that were NOT previously carried
+    const native = existing.filter(it => !prevSet.has(carryKey(it)));
+    const nativeTextSet = new Set(native.map(it => _norm(it.text)));
+
     const newCarriedItems = [];
-    carryMap.forEach(({ text, folder }, composite) => { if (!nativeSet.has(composite)) newCarriedItems.push({ text, done: false, folder }); });
+    carryMap.forEach(({ text, folder }, composite) => {
+      const norm = _norm(text);
+      const editedPrevCarriedPresent = prevTextSet.has(norm) && nativeTextSet.has(norm);
+      const exactNative = native.some(it => carryKey(it) === composite);
+      if (!editedPrevCarriedPresent && !exactNative) {
+        newCarriedItems.push({ text, done: false, folder });
+      }
+    });
 
     const nextItems = [...newCarriedItems, ...native];
+
     if (!itemsEqual(existing, nextItems)) {
       changed = true;
       if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
@@ -654,11 +680,14 @@ function syncTomorrowFromToday(mode = "time") {
     }
   });
 
-  if (changed || !carriedMetaEqual(tomorrowData.__carried || {}, newCarriedMeta)) {
+  if (headersChanged) tomorrowData[hdrKey] = tomHeaders;
+  if (changed || headersChanged || !carriedMetaEqual(tomorrowData.__carried || {}, newCarriedMeta)) {
     tomorrowData.__carried = newCarriedMeta;
     saveJSON(tKey, tomorrowData);
   }
+
 }
+
 
 
 // --- debounced sync trigger
@@ -716,6 +745,13 @@ function setHeaderAndTitle() {
   if (todayEl) todayEl.textContent = `${W}, ${Dn}${ord(Dn)} of ${M}`;
 }
 
+function rebuildHeaderFromStorage() {
+  setHeaderAndTitle();
+  updateGreeting();
+  const day = loadJSON(dayKey(DAY_OFFSET), {}) || {};
+  const n = Number.isFinite(day.__smokes) ? day.__smokes : 0;
+  setSmokesCount(n);
+}
 
 /* -------- Highlight current block (today only) -------- */
 function highlightCurrentBlock() {
@@ -737,7 +773,8 @@ function wireChecklist(root) {
   const input = root.querySelector("[data-checklist-input]");
   const list = root.querySelector("[data-checklist-list]");
   if (!form || !input || !list) return;
-
+  if (root.__wiredChecklist) return;
+  root.__wiredChecklist = true;
   const cardKey = root.dataset.key || "card";
   let id = 0;
   let suppressSave = false;
@@ -756,18 +793,22 @@ function wireChecklist(root) {
     wrap.appendChild(menu);
 
     function applyTemplate(items, preserveDone) {
+      // why: templates only for time cards; treat '#' literally
+      if (!TIME_KEYS.includes(cardKey)) return;
+
       const have = new Set(
         [...list.querySelectorAll('[data-role="label"]')]
           .map(n => (n.textContent || "").trim().toLowerCase())
       );
+
       suppressSave = true;
       (items || []).forEach(it => {
         const text = capFirst(typeof it === "string" ? it : (it?.text || ""));
         if (!text) return;
-        const n = text.toLowerCase();
-        if (have.has(n)) return;
-        addItem(text, preserveDone && !!it?.done);
-        have.add(n);
+        const k = text.toLowerCase();
+        if (have.has(k)) return;
+        addItem(text, preserveDone && !!it?.done); // no folder arg
+        have.add(k);
       });
       suppressSave = false;
       snapshotDay();
@@ -840,11 +881,15 @@ function wireChecklist(root) {
     document.addEventListener("templates:changed", () => { rebuildMenu(); updateTemplateToggle(); });
     updateTemplateToggle();
   }
-  // Save template button (attribute only)
+
+
+  // Save template button (time cards only)
   const saveBtn = root.querySelector("[data-template-save]");
   if (saveBtn) {
     saveBtn.type = "button";
     saveBtn.addEventListener("click", () => {
+      if (!TIME_KEYS.includes(cardKey)) { alert("Templates are for time blocks only."); return; } // why: prevent misuse
+
       const name = (prompt("Template name?") || "").trim();
       if (!name) return;
 
@@ -857,7 +902,7 @@ function wireChecklist(root) {
       if (!items.length) { alert("No items to save."); return; }
 
       const store = readTemplates();
-      store[name] = items;
+      store[name] = items; // no folder field
       saveTemplates(store);
       document.dispatchEvent(new CustomEvent("templates:changed"));
     });
@@ -866,8 +911,6 @@ function wireChecklist(root) {
   function addItem(text, done = false, restoring = false, folder = "") {
     const isTimeCard = TIME_KEYS.includes(cardKey);
     const f = isTimeCard ? "" : String(folder || "");
-
-    if (!isTimeCard && f) ensureFolderHeader(list, cardKey, f);
 
     const li = el("li", "mt-3 flex items-center gap-2 px-3");
     li.setAttribute("data-folder", f);
@@ -887,11 +930,23 @@ function wireChecklist(root) {
     const boxWrap = el("span", "relative inline-flex items-center justify-center w-5 h-5");
     const box = el("span", "w-5 h-5 rounded bg-white border-2 border-neutral pointer-events-none");
     box.setAttribute("aria-hidden", "true");
-    const icon = svgCheck(); icon.setAttribute("aria-hidden", "true"); icon.classList.add("absolute"); icon.style.opacity = "0";
+    const icon = svgCheck();
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("absolute", "opacity-0", "pointer-events-none");
     boxWrap.append(box, icon);
 
     const labelEl = el("span", "flex-1 text-accents font-bold tracking-wide text-xl font-sec");
     labelEl.textContent = text; labelEl.setAttribute("data-role", "label");
+
+    function syncTick() {
+      const checked = cb.checked;
+      labelEl.classList.toggle("line-through", checked);
+      icon.classList.toggle("opacity-0", !checked);
+      icon.classList.toggle("opacity-100", checked);
+      icon.setAttribute("aria-hidden", checked ? "false" : "true");
+      box.classList.toggle("border-main", !checked);
+      box.classList.toggle("border-accents", checked);
+    }
 
     const edit = el("button", "px-2 py-1 rounded-md text-accents/80 hover:text-white hover:bg-neutral transition-colors", "✎");
     edit.type = "button"; edit.title = "Edit";
@@ -901,38 +956,39 @@ function wireChecklist(root) {
 
     // checkbox react
     cb.addEventListener("change", () => {
-      const checked = cb.checked;
-      labelEl.classList.toggle("line-through", checked);
-      icon.style.opacity = checked ? "1" : "0";
-      icon.setAttribute("aria-hidden", checked ? "false" : "true");
-      box.classList.toggle("border-main", !checked);
-      box.classList.toggle("border-accents", checked);
-      if (!suppressSave) snapshotDay();
+      syncTick();
+      if (!suppressSave) snapshotDayImmediate();
     });
+
 
     // inline edit (disable toggle while editing)
     edit.addEventListener("click", () => {
       if (labelEl.isContentEditable) return;
       const original = labelEl.textContent;
       labelEl.contentEditable = "true";
-      labelEl.style.outline = "none";
+      labelEl.classList.add("outline-none");
       row.removeAttribute("for"); // clicking label won't toggle
       cb.disabled = true;         // checking disabled while editing
       labelEl.focus(); placeCaretEnd(labelEl);
 
       function commit() {
         labelEl.textContent = (labelEl.textContent || "").trim();
-        if (!labelEl.textContent) { li.remove(); updateFolderCounts(list); snapshotDay(); cleanup(); return; }
+        if (!labelEl.textContent) { li.remove(); updateFolderCounts(list); snapshotDay(); edit.focus(); cleanup(); return; }
         labelEl.contentEditable = "false";
         row.setAttribute("for", itemId);
         cb.disabled = false;
-        snapshotDay(); cleanup();
+        snapshotDay();
+        edit.focus();
+        labelEl.classList.remove("outline-none");
+        cleanup();
       }
       function cancel() {
         labelEl.textContent = original;
         labelEl.contentEditable = "false";
         row.setAttribute("for", itemId);
         cb.disabled = false;
+        edit.focus();
+        labelEl.classList.remove("outline-none");
         cleanup();
       }
       function onKey(e) {
@@ -992,16 +1048,27 @@ function wireChecklist(root) {
     row.append(cb, boxWrap, labelEl);
     li.append(handle, row, edit, del);
 
-    let header = null;
+    let inserted = false;
     if (!isTimeCard) {
-      header = ensureFolderHeader(list, cardKey, f);
+      // ensure header for this folder
+      ensureFolderHeader(list, cardKey, f);
+
+      // append after the last item in the same folder (preserves order)
+      const same = [...list.querySelectorAll(`li[data-folder="${f}"]`)];
+      const last = same.length ? same[same.length - 1] : null;
+      if (last) { list.insertBefore(li, last.nextSibling); inserted = true; }
+      else {
+        const header = list.querySelector(f ? `[data-folder-header="${f}"]`
+          : `[data-folder-header="__none"]`);
+        if (header) { list.insertBefore(li, header.nextSibling); inserted = true; }
+      }
     }
-    if (header) list.insertBefore(li, header.nextSibling);
-    else list.appendChild(li);
+    if (!inserted) list.appendChild(li);
+
 
     suppressSave = true;
     cb.checked = !!done;
-    cb.dispatchEvent(new Event("change"));
+    syncTick();
     suppressSave = false;
 
     if (!restoring) { updateFolderCounts(list); snapshotDay(); }
@@ -1019,54 +1086,54 @@ function wireChecklist(root) {
     const raw = (input.value || "").trim();
     if (!raw) return;
 
+    const parts = raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
     const isTimeCard = TIME_KEYS.includes(cardKey);
 
-    raw.split(/[\n,]+/)
-      .map(s => s.trim())
-      .filter(Boolean)
-      .forEach(line => {
-        const { text, folders } = parseItemAndTags(line, { isTimeCard });
+    // parse all parts first
+    const entries = parts.map(line => {
+      const del = parseFolderDelete(line);
+      const { text, folders } = parseItemAndTags(line, { isTimeCard });
+      return { line, del, text, folders };
+    });
 
-        // create empty folders when only tags are provided (e.g. "#test" or "#a #b")
-        if (!isTimeCard && !text && folders.length) {
+    // propagate trailing tags (e.g., "a,b,c #work") to earlier items without tags
+    if (!isTimeCard) {
+      const nonDel = entries.filter(e => !e.del);
+      if (nonDel.length > 1) {
+        const last = nonDel[nonDel.length - 1];
+        if (last.folders.length && nonDel.slice(0, -1).every(e => e.folders.length === 0)) {
+          const common = last.folders.slice();
+          nonDel.slice(0, -1).forEach(e => { e.folders = common.slice(); });
+        }
+      }
+    }
+
+    // now handle each entry as before
+    entries.forEach(({ del, text, folders, line }) => {
+      if (isTimeCard) {
+        if (text) addItem(capFirst(text), false, false, "");
+        return;
+      }
+
+      if (del) { deleteFolderCommand(list, cardKey, del); return; }
+
+      const haveFolders = folders && folders.length;
+      if (!text) {
+        if (haveFolders) {
           folders.forEach(f => ensureFolderHeader(list, cardKey, f));
           updateFolderCounts(list);
-          snapshotDay(); // NEW: persist empty headers
-          return;
+          snapshotDay();
         }
+        return;
+      }
 
-
-        if (isTimeCard) {
-          // time-cards ignore tags; keep literal text
-          if (text) addItem(capFirst(text), false, false, "");
-          return;
-        }
-
-        // "-folder" deletes that folder (moves its items to Unfiled)
-        const del = parseFolderDelete(line);
-        if (del) { deleteFolderCommand(list, cardKey, del); return; }
-
-        const norm = _norm(capFirst(text));
-
-
-        if (folders.length) {
-          // add to each tagged folder only if not already present in that folder
-          folders.forEach(f => {
-            if (!findDupInFolder(list, f, norm)) {
-              addItem(capFirst(text), false, false, f);
-            }
-          });
-        } else {
-          // no tags -> Unfiled, skip if duplicate there
-          if (!findDupInFolder(list, "", norm)) {
-            addItem(capFirst(text), false, false, "");
-          } else {
-            // keep Unfiled header hidden-until-needed policy intact
-            ensureUnfiledHeaderIfNeeded(list, cardKey);
-          }
-        }
-      });
-
+      const norm = _norm(capFirst(text));
+      if (haveFolders) {
+        folders.forEach(f => { if (!findDupInFolder(list, f, norm)) addItem(capFirst(text), false, false, f); });
+      } else {
+        if (!findDupInFolder(list, "", norm)) addItem(capFirst(text), false, false, "");
+      }
+    });
     input.value = "";
   });
 
@@ -1080,9 +1147,22 @@ function wireChecklist(root) {
   list.addEventListener("click", (e) => {
     const header = e.target.closest('li[data-folder-header]');
     if (!header) return;
-    const key = header.dataset.folderHeader === "__none" ? "" : header.dataset.folderHeader;
-    const collapsed = !header.hasAttribute("data-collapsed");
-    setFolderCollapsed(list, cardKey, key, collapsed);
+
+    const caretIcon = e.target.closest('i.collapseFolderCaret');
+    const folderKey = header.dataset.folderHeader === "__none" ? "" : header.dataset.folderHeader;
+    const next = !header.hasAttribute("data-collapsed");
+
+    // Alt/Meta on the folder caret → toggle ALL folders in this card
+    if (caretIcon && (e.altKey || e.metaKey)) {
+      list.querySelectorAll('li[data-folder-header]').forEach(h => {
+        const k = h.dataset.folderHeader === "__none" ? "" : h.dataset.folderHeader;
+        setFolderCollapsed(list, cardKey, k, next);
+      });
+      return;
+    }
+
+    // Default → toggle just this folder
+    setFolderCollapsed(list, cardKey, folderKey, next);
   });
 
   // Smoke toggle (time cards)
@@ -1097,14 +1177,27 @@ function wireBullets(root) {
   const list = root.querySelector("[data-bullets-list]");
   const key = root.dataset.key || "notes";
   if (!form || !input || !list) return;
-
+  if (root.__wiredBullets) return;
+  root.__wiredBullets = true;
   list.addEventListener("click", (e) => {
     const header = e.target.closest('li[data-folder-header]');
     if (!header) return;
-    const k = header.dataset.folderHeader === "__none" ? "" : header.dataset.folderHeader;
-    const collapsed = !header.hasAttribute("data-collapsed");
-    setFolderCollapsed(list, key, k, collapsed);
+
+    const caretIcon = e.target.closest('i.collapseFolderCaret');
+    const folderKey = header.dataset.folderHeader === "__none" ? "" : header.dataset.folderHeader;
+    const next = !header.hasAttribute("data-collapsed");
+
+    if (caretIcon && (e.altKey || e.metaKey)) {
+      list.querySelectorAll('li[data-folder-header]').forEach(h => {
+        const k = h.dataset.folderHeader === "__none" ? "" : h.dataset.folderHeader;
+        setFolderCollapsed(list, key, k, next);
+      });
+      return;
+    }
+
+    setFolderCollapsed(list, key, folderKey, next);
   });
+
 
 
   function readItems() {
@@ -1124,22 +1217,49 @@ function wireBullets(root) {
   }
 
 
+  // submit text -> create headers and items using "item #tag/sub #tag2" syntax
   function addItemsFrom(text) {
-    text.split(/[\n,]+/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .forEach((line) => {
-        const del = parseFolderDelete(line);
-        if (del) {
-          deleteFolderInList(list, key, del);
-          writeItems(currentItems());
-          return;
-        }
-        const { folder, text } = parseFolderAndText(line);
-        if (text) addItem(capFirst(text), false, folder);
-      });
-  }
+    const parts = text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+    const entries = parts.map(line => {
+      const del = parseFolderDelete(line);
+      const { text: body, folders } = parseItemAndTags(line);
+      return { del, body, folders };
+    });
 
+    // propagate trailing tags to earlier items without tags
+    const nonDel = entries.filter(e => !e.del);
+    if (nonDel.length > 1) {
+      const last = nonDel[nonDel.length - 1];
+      if (last.folders.length && nonDel.slice(0, -1).every(e => e.folders.length === 0)) {
+        const common = last.folders.slice();
+        nonDel.slice(0, -1).forEach(e => { e.folders = common.slice(); });
+      }
+    }
+
+    entries.forEach(({ del, body, folders }) => {
+      if (del) {
+        deleteFolderCommand(list, key, del);
+        writeItems(currentItems());
+        return;
+      }
+
+      const haveFolders = folders && folders.length;
+      if (!body) {
+        if (haveFolders) {
+          folders.forEach(f => ensureFolderHeader(list, key, f));
+          updateFolderCounts(list);
+          snapshotDay();
+          writeItems(currentItems());
+        }
+        return;
+      }
+
+      const t = capFirst(body);
+      if (haveFolders) folders.forEach(f => addItem(t, false, f));
+      else addItem(t, false, "");
+    });
+
+  }
 
   function addItem(text, restoring = false, folder = "") {
     const f = String(folder || "");
@@ -1166,17 +1286,23 @@ function wireBullets(root) {
       if (txt.isContentEditable) return;
       const original = txt.textContent;
       txt.contentEditable = "true";
-      txt.style.outline = "none";
+      txt.classList.add("outline-none");
       txt.focus(); placeCaretEnd(txt);
 
       function commit() {
         txt.textContent = (txt.textContent || "").trim();
-        if (!txt.textContent) { li.remove(); updateFolderCounts(list); writeItems(currentItems()); cleanup(); return; }
+        if (!txt.textContent) { li.remove(); updateFolderCounts(list); writeItems(currentItems()); edit.focus(); cleanup(); return; }
         txt.contentEditable = "false";
         writeItems(currentItems());
+        edit.focus();
+        txt.classList.remove("outline-none");
         cleanup();
       }
-      function cancel() { txt.textContent = original; txt.contentEditable = "false"; cleanup(); }
+      function cancel() {
+        txt.textContent = original; txt.contentEditable = "false"; edit.focus();
+        txt.classList.remove("outline-none");
+        cleanup();
+      }
       function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
       function cleanup() { txt.removeEventListener("keydown", onKey); txt.removeEventListener("blur", commit); }
 
@@ -1208,9 +1334,16 @@ function wireBullets(root) {
 
     li.append(handle, txt, edit, del);
 
-    // insert after this folder's header if present
-    const header = ensureFolderHeader(list, key, f);
-    list.insertBefore(li, header.nextSibling);
+    ensureFolderHeader(list, key, f);
+    const same = [...list.querySelectorAll(`li[data-folder="${f}"]`)];
+    const last = same.length ? same[same.length - 1] : null;
+    if (last) list.insertBefore(li, last.nextSibling);
+    else {
+      const header = list.querySelector(f ? `[data-folder-header="${f}"]`
+        : `[data-folder-header="__none"]`);
+      if (header) list.insertBefore(li, header.nextSibling);
+      else list.appendChild(li);
+    }
 
     if (!restoring) { updateFolderCounts(list); writeItems(currentItems()); }
 
@@ -1225,18 +1358,22 @@ function wireBullets(root) {
       typeof it === "object" ? (it.folder || "") : ""));
   updateFolderCounts(list);
 
-
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    e.stopPropagation();
-    addItemsFrom(input.value);
+    const raw = (input.value || "").trim();
+    if (!raw) return;
+    addItemsFrom(raw);
     input.value = "";
-    input.focus();
   });
 
   input.addEventListener("blur", () => { input.value = capFirst(input.value); });
 
   root.__addBulletItem = (text, restoring = false) => addItem(text, restoring);
+}
+
+function wireCard(root) {
+  if (root.matches("[data-checklist]")) { wireChecklist(root); return; }
+  if (root.matches("[data-bullets]")) { wireBullets(root); return; }
 }
 
 /* -------- Smoke toggle -------- */
@@ -1247,39 +1384,48 @@ function wireSmoke(container) {
   const label = container.querySelector('[data-role="label"]');
   if (!cb || !box || !icon || !label) return;
 
+  // only inject a new SVG if the holder is NOT already an <svg>
+  if (!(icon instanceof SVGElement) && !icon.querySelector('svg')) {
+    const svg = svgCheck();
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add('pointer-events-none');
+    icon.appendChild(svg);
+  }
+  // ensure inline opacity can't win
+  icon.style.opacity = '';
+
   const card = container.closest('[data-checklist][data-key]');
   const cardKey = card?.dataset.key;
 
-  cb.addEventListener("change", () => {
+  const syncSmoke = () => {
     const checked = cb.checked;
-
     label.classList.toggle("line-through", checked);
-    icon.style.opacity = checked ? "1" : "0";
+    icon.classList.toggle("opacity-0", !checked);
+    icon.classList.toggle("opacity-100", checked);
     icon.setAttribute("aria-hidden", checked ? "false" : "true");
     box.classList.toggle("border-main", !checked);
     box.classList.toggle("border-accents", checked);
+  };
 
+  // initial paint
+  syncSmoke();
+
+  cb.addEventListener("change", () => {
+    syncSmoke();
     if (cardKey) {
       const k = dayKey();
       const day = loadJSON(k, {}) || {};
       const counted = day.__smokeCounted || {};
       const wasCounted = !!counted[cardKey];
-
-      if (checked && !wasCounted) {
-        setSmokesCount(getSmokesCountFromDOM() + 1);
-        counted[cardKey] = true;
-      } else if (!checked && wasCounted) {
-        setSmokesCount(Math.max(0, getSmokesCountFromDOM() - 1));
-        counted[cardKey] = false;
-      }
-
+      if (cb.checked && !wasCounted) { setSmokesCount(getSmokesCountFromDOM() + 1); counted[cardKey] = true; }
+      else if (!cb.checked && wasCounted) { setSmokesCount(Math.max(0, getSmokesCountFromDOM() - 1)); counted[cardKey] = false; }
       day.__smokeCounted = counted;
       saveJSON(k, day);
     }
-
     snapshotDay();
   });
 }
+
 
 /* -------- Caret UI helper (shared) -------- */
 function applyCollapsedUI(key, collapsed) {
@@ -1294,7 +1440,6 @@ function applyCollapsedUI(key, collapsed) {
   // toggle main content
   const list = card.querySelector("[data-checklist-list],[data-bullets-list]");
   const form = card.querySelector("[data-checklist-form],[data-bullets-form]");
-  // NOTE: clear button visibility is handled by updateClearCheckedVisibility()
   if (list) list.classList.toggle("hidden", collapsed);
   if (form) form.classList.toggle("hidden", collapsed);
 
@@ -1452,7 +1597,8 @@ function collectBulletsFromDOM() {
 }
 
 /* -------- Snapshot helpers -------- */
-function snapshotDay() {
+// trailing debounce to reduce localStorage churn
+function snapshotDayImmediate() {
   const key = dayKey();
   const prev = loadJSON(key, {}) || {};
   const next = collectChecklistsFromDOM();
@@ -1462,12 +1608,30 @@ function snapshotDay() {
   if (prev.__carried) next.__carried = prev.__carried;
   if (prev.__smokeCounted) next.__smokeCounted = prev.__smokeCounted;
   if (prev.__clearedDone) next.__clearedDone = prev.__clearedDone;
-  if (prev[folderStateKey()]) next[folderStateKey()] = prev[folderStateKey()];
   saveJSON(key, next);
 
+  saveJSON(key, next);
 
-  if (DAY_OFFSET === 0) syncTomorrowDebounced("time");
+  // Only Today drives auto-syncs
+  if (DAY_OFFSET === 0) {
+    const prevHdrs = prev[folderHeadersKey()] || {};
+    const nextHdrs = next[folderHeadersKey()] || {};
+    const headersChanged = JSON.stringify(prevHdrs) !== JSON.stringify(nextHdrs);
+
+    if (headersChanged) {
+      // Propagate new/removed empty folder headers immediately across all cards
+      syncTomorrowFromToday("all");
+    } else {
+      // Keep frequent edits light: carry only time-blocks
+      syncTomorrowDebounced("time");
+    }
+  }
+
 }
+
+
+// Replace direct saves with a debounced wrapper
+const snapshotDay = debounce(() => snapshotDayImmediate(), 300);
 
 
 /* -------- Ensure blank tomorrow exists (today view) -------- */
@@ -1563,38 +1727,33 @@ function collapsePastTimeCards() {
   if (DAY_OFFSET !== 0) return; // only on Today
   const key = dayKey(0);
   const data = loadJSON(key, {}) || {};
-  data.__collapsed = data.__collapsed || {};
+  const ui = (data.__ui = data.__ui || { folders: {}, cards: { manual: {}, auto: {} } });
+  ui.cards.manual = ui.cards.manual || {};
+  ui.cards.auto = ui.cards.auto || {};
   let moved = false;
 
   for (let i = 0; i < TIME_KEYS.length; i++) {
     const fromKey = TIME_KEYS[i];
-    const toKey = TIME_KEYS[i + 1]; // undefined for evening
-    const manual = !!(data.__manualCollapsed && data.__manualCollapsed[fromKey]);
+    const toKey = TIME_KEYS[i + 1];
+    const manual = !!ui.cards.manual[fromKey];
     const shouldCollapse = new Date().getHours() >= cardEndHour(fromKey);
     applyCollapsedUI(fromKey, shouldCollapse || manual);
 
-
-    if (shouldCollapse && !data.__collapsed[fromKey] && toKey) {
+    if (shouldCollapse && !ui.cards.auto[fromKey] && toKey) {
       const from = (data[fromKey]?.items) ? data[fromKey] : (data[fromKey] = { type: "checklist", items: [], smoke: false });
       const to = (data[toKey]?.items) ? data[toKey] : (data[toKey] = { type: "checklist", items: [], smoke: false });
 
       const carry = (from.items || []).filter((it) => !it.done);
       const keep = (from.items || []).filter((it) => it.done);
 
-      to.items = [...carry, ...(to.items || [])]; // prepend
+      to.items = [...carry, ...(to.items || [])];
       from.items = keep;
 
-      data.__collapsed[fromKey] = true;
+      ui.cards.auto[fromKey] = true;
       moved = true;
     }
   }
-
-  if (moved) {
-    saveJSON(key, data);
-    TIME_KEYS.forEach(renderCardFromStorage);
-    syncTomorrowDebounced("time");
-  }
-
+  if (moved) saveJSON(key, data);
 }
 
 // Stores cleared done items under day.__clearedDone[cardKey] = [text,...]
@@ -1603,11 +1762,9 @@ function wireClearChecked() {
     const btn = e.target.closest("[data-clear-checked]");
     if (!btn) return;
 
-    if (DAY_OFFSET !== 0) return; // only on Today
-
     const card = btn.closest("[data-checklist][data-key]");
     const key = card?.dataset.key;
-    if (!card || !["work", "home", "shopping"].includes(key)) return;
+    if (!card || !key) return;
 
     const list = card.querySelector("[data-checklist-list]");
     if (!list) return;
@@ -1625,7 +1782,7 @@ function wireClearChecked() {
 
     // archive them (do this before removing from DOM)
     if (texts.length) {
-      const k = dayKey();
+      const k = dayKey(DAY_OFFSET); // why: archive on the active page's day
       const day = loadJSON(k, {}) || {};
       const arch = day.__clearedDone || {};
       arch[key] = [...(arch[key] || []), ...texts];
@@ -1688,12 +1845,16 @@ async function onRestore() {
   }
 }
 
-function onEndDay() {
+async function onEndDay() {
+  if (ENDING_DAY) return;        // one-shot guard
+  ENDING_DAY = true;
+
+  snapshotDayImmediate(); // ensure latest edits are persisted
+
   const todayKey = dayKey(0);
   const tomorrowKey = dayKey(1);
 
   ensureEmptyDay(1);
-
   const todayData = loadJSON(todayKey, {}) || {};
   const tomorrowData = loadJSON(tomorrowKey, {}) || {};
   const carriedMeta = {};
@@ -1701,28 +1862,32 @@ function onEndDay() {
   Object.keys(todayData || {}).forEach((key) => {
     const entry = todayData[key];
     if (entry?.type === "checklist" && Array.isArray(entry.items)) {
-      const carry = entry.items.filter((it) => !it.done);
+      const carry = entry.items.filter((it) => !it.done && _norm(it.text));
       if (!tomorrowData[key]) tomorrowData[key] = { type: "checklist", items: [], smoke: false };
-      // prepend, preserving folders
-      const existing = tomorrowData[key].items || [];
-      const existingSet = new Set(existing.map(it => `${_norm(it.text)}@${String(it.folder || "")}`));
-      const newCarry = carry.filter(it => !existingSet.has(`${_norm(it.text)}@${String(it.folder || "")}`));
-      tomorrowData[key].items = [...newCarry, ...existing];
 
-      if (newCarry.length) carriedMeta[key] = newCarry.map((it) => `${_norm(it.text)}@${String(it.folder || "")}`);
+      const existing = tomorrowData[key].items || [];
+      const existingSet = new Set(existing.map((it) => carryKey(it)));
+      const newCarry = carry.filter((it) => !existingSet.has(carryKey(it)));
+
+      tomorrowData[key].items = [...newCarry, ...existing];
+      if (newCarry.length) carriedMeta[key] = newCarry.map((it) => carryKey(it));
     }
   });
+
   tomorrowData.__carried = carriedMeta;
   saveJSON(tomorrowKey, tomorrowData);
 
+  // Sequential downloads; give the browser time to dispatch each
   downloadDayViaHref(0);
+  await new Promise(r => setTimeout(r, 200));
   downloadDayViaHref(1);
+  await new Promise(r => setTimeout(r, 250));
 
-  setTimeout(() => {
-    setBaseDate(getPlannerDate(1));
-    location.href = "./index.html";
-  }, NAV_DELAY_MS);
+  setBaseDate(getPlannerDate(1));
+  setTimeout(() => { location.href = "./index.html"; }, NAV_DELAY_MS);
 }
+
+
 
 
 function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
@@ -1739,18 +1904,17 @@ function ensureCardKey(card) {
 
 /* -------- Boot -------- */
 document.addEventListener("DOMContentLoaded", () => {
-  setHeaderAndTitle();
-  updateGreeting();
-
-  document.querySelectorAll("[data-checklist]").forEach(wireChecklist);
-  document.querySelectorAll("[data-bullets]").forEach(wireBullets);
+  rebuildHeaderFromStorage();
+  migrateUIState();
+  document.querySelectorAll("[data-checklist],[data-bullets]").forEach(wireCard);
   document.querySelectorAll("[data-countdown]").forEach(wireCountdown);
-  wireCarets(); // new
+  wireCarets();
 
-  wireClearButtons();               // NEW
+  wireClearButtons();
   wireClearChecked();
   if (DAY_OFFSET === 1) syncTomorrowFromToday("all");
   restoreAll();
+  if (DAY_OFFSET === 0) syncTomorrowFromToday("all");
   collapsePastTimeCards();
   setInterval(collapsePastTimeCards, 5 * 60 * 1000);
 
@@ -1769,10 +1933,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!btn) return;
     e.preventDefault();
     const act = btn.dataset.action;
-    if (act === "download") downloadDayViaHref(DAY_OFFSET);
+    if (act === "download") { snapshotDayImmediate(); downloadDayViaHref(DAY_OFFSET); }
     else if (act === "restore") onRestore();
     else if (act === "endday") onEndDay();
   });
+
 });
 
 

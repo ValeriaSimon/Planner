@@ -3,7 +3,7 @@ export default {
     return [
       { source: '/',         destination: '/index.html' },
       { source: '/today',    destination: '/index.html' },
-      { source: '/tomorrow', destination: '/index.html' },
+      { source: '/tomorrow', destination: '/tomorrow.html' },
     ];
   },
 };
