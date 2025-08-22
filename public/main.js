@@ -62,10 +62,17 @@ function bulletsKey(key, ds = null) {
 /* -------- JSON helpers -------- */
 const REMOTE_CACHE = new Map();
 function loadJSON(key, fallback) {
-  return REMOTE_CACHE.has(key) ? REMOTE_CACHE.get(key) : fallback;
+  if (REMOTE_CACHE.has(key)) return REMOTE_CACHE.get(key);
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw != null) return JSON.parse(raw);
+  } catch { }
+  return fallback;
 }
 async function saveJSON(key, value) {
   REMOTE_CACHE.set(key, value);
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { }
+
   const FB = window.firebaseServices;
   const u = FB?.auth?.currentUser;
   if (!FB || !u) return;
@@ -82,28 +89,41 @@ async function saveJSON(key, value) {
   }
 }
 
+
 // live-fill the cache on sign-in
 window.startFirebaseSync = function startFirebaseSync(user) {
   const FB = window.firebaseServices;
   if (!FB || !user) return;
 
+  // prevent duplicate listeners across re-inits
+  window.__fbUnsubs?.forEach(fn => { try { fn(); } catch { } });
+  window.__fbUnsubs = [];
+
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const today = fmt(getPlannerDate(0));
   const tomorrow = fmt(getPlannerDate(1));
   const daysToWatch = [today, tomorrow];
+  const currentDS = ymd(getPlannerDate(DAY_OFFSET));
 
   daysToWatch.forEach(async ds => {
     const dayKeyStr = `planner:${ds}`;
     const ref = FB.doc(FB.db, "users", user.uid, "days", ds);
     const snap = await FB.getDoc(ref);
     REMOTE_CACHE.set(dayKeyStr, snap.exists() ? (snap.data() || {}) : {});
-    FB.onSnapshot(ref, d => REMOTE_CACHE.set(dayKeyStr, d.exists() ? (d.data() || {}) : {}));
 
-    FB.onSnapshot(FB.collection(FB.db, "users", user.uid, "days", ds, "bullets"), qs => {
+    // store unsubs so repeated inits don't stack listeners
+    const unsubDay = FB.onSnapshot(ref, d => {
+      REMOTE_CACHE.set(dayKeyStr, d.exists() ? (d.data() || {}) : {});
+    });
+    window.__fbUnsubs.push(unsubDay);
+
+    const col = FB.collection(FB.db, "users", user.uid, "days", ds, "bullets");
+    const unsubBullets = FB.onSnapshot(col, qs => {
       qs.forEach(docSnap => {
         REMOTE_CACHE.set(`planner:${ds}:bullets:${docSnap.id}`, docSnap.data()?.items || []);
       });
     });
+    window.__fbUnsubs.push(unsubBullets);
   });
 
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "notes"),
@@ -111,6 +131,7 @@ window.startFirebaseSync = function startFirebaseSync(user) {
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "countdown"),
     d => REMOTE_CACHE.set("planner:countdown", d.data() || null));
 };
+
 
 // Shallow item-array equality: [{text,done,folder}, ...]
 function itemsEqual(a = [], b = []) {
@@ -1584,6 +1605,9 @@ function restoreAll() {
     const key = card.dataset.key;
     const list = card.querySelector("[data-checklist-list]");
 
+    // CLEAR existing items to avoid duplicates on repeated restores
+    if (list) list.innerHTML = "";
+
     // 1) restore empty headers first so items can slot under them
     (headersMap[key] || []).forEach(h => ensureFolderHeader(list, key, h));
 
@@ -1652,8 +1676,6 @@ function snapshotDayImmediate() {
   if (prev.__carried) next.__carried = prev.__carried;
   if (prev.__smokeCounted) next.__smokeCounted = prev.__smokeCounted;
   if (prev.__clearedDone) next.__clearedDone = prev.__clearedDone;
-  saveJSON(key, next);
-
   saveJSON(key, next);
 
   // Only Today drives auto-syncs
