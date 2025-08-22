@@ -754,7 +754,7 @@ function setSmokesCount(n) {
 
 /* -------- Greeting + titles -------- */
 function updateGreeting() {
-  const h1 = document.getElementById("greeting") ;
+  const h1 = document.getElementById("greeting");
   if (!h1) return;
   const hr = new Date().getHours();
   const MORNING_START = 6;
@@ -1871,15 +1871,20 @@ async function onRestore() {
     const ds = data.date || (file.name.match(/^(\d{4}-\d{2}-\d{2})-planner\.json$/)?.[1]) || ymd(getPlannerDate(DAY_OFFSET));
     const dKey = dayKeyFromDateStr(ds);
 
-    if (data.day && typeof data.day === "object") saveJSON(dKey, data.day);
+    const tasks = [];
+    if (data.day && typeof data.day === "object") tasks.push(saveJSON(dKey, data.day));
+
     if (data.bullets && typeof data.bullets === "object") {
       Object.keys(data.bullets).forEach((k) => {
         const entry = data.bullets[k];
         const items = Array.isArray(entry?.items) ? entry.items : [];
-        saveJSON(bulletsKey(k, ds), items);
+        tasks.push(saveJSON(bulletsKey(k, ds), items));
       });
     }
-    if (Array.isArray(data.notes)) saveJSON(GLOBAL_NOTES_KEY, data.notes);
+
+    if (Array.isArray(data.notes)) tasks.push(saveJSON(GLOBAL_NOTES_KEY, data.notes));
+
+    await Promise.all(tasks);
 
     const currentDS = ymd(getPlannerDate(DAY_OFFSET));
     if (ds === currentDS) location.reload();
