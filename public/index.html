@@ -510,7 +510,45 @@
 
     </div>
 
+    <!-- Firebase boot + bridge -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
+        const firebaseConfig = {
+            apiKey: "AIzaSyDW5xBcbpHzWrFpO8LDA4vVt8qeenGqosw",
+            authDomain: "planner-bdd6f.firebaseapp.com",
+            projectId: "planner-bdd6f",
+            storageBucket: "planner-bdd6f.firebasestorage.app",
+            messagingSenderId: "575920639228",
+            appId: "1:575920639228:web:10b3f9250d861086639b79"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // expose to main.js
+        window.firebaseServices = {
+            auth, db,
+            GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
+            doc, setDoc, getDoc, onSnapshot, collection
+        };
+
+        // tiny auth UI
+        const bar = Object.assign(document.createElement('div'), { style: 'position:fixed;top:8px;right:8px;z-index:9999' });
+        const signIn = Object.assign(document.createElement('button'), { textContent: 'Sign in' });
+        const signOutBtn = Object.assign(document.createElement('button'), { textContent: 'Sign out', style: 'margin-left:6px;display:none' });
+        bar.append(signIn, signOutBtn); document.body.append(bar);
+        signIn.onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+        signOutBtn.onclick = () => signOut(auth);
+        onAuthStateChanged(auth, u => {
+            signIn.style.display = u ? 'none' : '';
+            signOutBtn.style.display = u ? '' : 'none';
+            if (window.startFirebaseSync) window.startFirebaseSync(u);
+        });
+    </script>
     <script src="main.js" defer></script>
 </body>
 

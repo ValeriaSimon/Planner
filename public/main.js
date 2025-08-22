@@ -60,13 +60,57 @@ function bulletsKey(key, ds = null) {
 
 
 /* -------- JSON helpers -------- */
+const REMOTE_CACHE = new Map();
 function loadJSON(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key) ?? JSON.stringify(fallback)); }
-  catch { return fallback; }
+  return REMOTE_CACHE.has(key) ? REMOTE_CACHE.get(key) : fallback;
 }
-function saveJSON(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+async function saveJSON(key, value) {
+  REMOTE_CACHE.set(key, value);
+  const FB = window.firebaseServices;
+  const u = FB?.auth?.currentUser;
+  if (!FB || !u) return;
+
+  const m = String(key).match(/^planner:(\d{4}-\d{2}-\d{2})(?::bullets:(.+))?$/);
+  if (key === "planner:notes") {
+    await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "notes"), { items: value || [] });
+  } else if (key === "planner:countdown") {
+    await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "countdown"), value || {});
+  } else if (m && m[1] && !m[2]) {
+    await FB.setDoc(FB.doc(FB.db, "users", u.uid, "days", m[1]), value || {});
+  } else if (m && m[1] && m[2]) {
+    await FB.setDoc(FB.doc(FB.db, "users", u.uid, "days", m[1], "bullets", m[2]), { items: value || [] });
+  }
 }
+
+// live-fill the cache on sign-in
+window.startFirebaseSync = function startFirebaseSync(user) {
+  const FB = window.firebaseServices;
+  if (!FB || !user) return;
+
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = fmt(getPlannerDate(0));
+  const tomorrow = fmt(getPlannerDate(1));
+  const daysToWatch = [today, tomorrow];
+
+  daysToWatch.forEach(async ds => {
+    const dayKeyStr = `planner:${ds}`;
+    const ref = FB.doc(FB.db, "users", user.uid, "days", ds);
+    const snap = await FB.getDoc(ref);
+    REMOTE_CACHE.set(dayKeyStr, snap.exists() ? (snap.data() || {}) : {});
+    FB.onSnapshot(ref, d => REMOTE_CACHE.set(dayKeyStr, d.exists() ? (d.data() || {}) : {}));
+
+    FB.onSnapshot(FB.collection(FB.db, "users", user.uid, "days", ds, "bullets"), qs => {
+      qs.forEach(docSnap => {
+        REMOTE_CACHE.set(`planner:${ds}:bullets:${docSnap.id}`, docSnap.data()?.items || []);
+      });
+    });
+  });
+
+  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "notes"),
+    d => REMOTE_CACHE.set("planner:notes", d.data()?.items || []));
+  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "countdown"),
+    d => REMOTE_CACHE.set("planner:countdown", d.data() || null));
+};
 
 // Shallow item-array equality: [{text,done,folder}, ...]
 function itemsEqual(a = [], b = []) {
