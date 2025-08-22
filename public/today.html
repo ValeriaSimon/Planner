@@ -13,8 +13,7 @@
     <link rel="icon" type="image/x-icon" href="images/fav.ico" />
 </head>
 
-<body data-day-offset="1" class="bg-neutral w-[85%] mx-auto">
-
+<body data-day-offset="0" class="bg-neutral w-[85%] mx-auto">
     <header class="flex justify-between">
         <div class="flex flex-col items-center">
             <h1 id="greeting"
@@ -27,6 +26,7 @@
         </div>
         <img src="images/garland.png" alt="Morning Image" class="h-64 w-[50%] object-fill pt-10" />
     </header>
+    <!-- Brown blocks section -->
     <section class="flex gap-8 items-start">
         <!-- Countdown card -->
         <div class="bg-main p-8 rounded-lg relative">
@@ -80,27 +80,43 @@
         </div>
 
         <!-- Plan tomorrow button (no stretching) -->
-        <div class="flex flex-col">
-            <a href="./today.html"
+        <div class="flex gap-4 flex-col">
+            <a href="./tomorrow.html"
                 class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
-                Back to current day
+                Plan tomorrow...
             </a>
-            <div class="mt-6 ml-2">
-                <button id="download-today" data-action="download" type="button">
+            <button type="button" data-action="endday" id="endday"
+                class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
+                End day!
+            </button>
+            <div class="flex items-center gap-3 mt-3">
+                <div class="text-white text-lg font-sec bg-main pt-3 px-4 rounded-lg flex gap-4">
+                    <span id="smokescount">0</span> <span id="smokescount-plus">+</span>
+                </div>
+
+                <button id="download-today" data-action="download" type="button"
+                    class="inline-flex items-center justify-center">
                     <i class="fa-solid fa-file-arrow-down" style="color:white;"></i>
                     <span class="sr-only">Download today</span>
                 </button>
+
+                <button id="restore" data-action="restore" class="inline-flex items-center justify-center">
+                    <i class="fa-solid fa-file-arrow-up" style="color:white;"></i>
+                    <span class="sr-only">Restore</span>
+                </button>
             </div>
+
         </div>
 
 
     </section>
+
     <div class="flex justify-between">
         <!-- LEFT COLUMN ------------------------------------------------------->
         <section class="py-32 flex flex-col gap-24 basis-1/4">
 
             <!-- CARD: Morning -->
-            <div class="bg-white p-8 outline-4 outline-main rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+            <div class="bg-white p-8 outline-4 outline-[#FFBA3A] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
                 data-checklist data-start="10" data-end="14" data-key="morning">
                 <img src="images/am.png" alt="Morning Image"
                     class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-20" />
@@ -143,7 +159,7 @@
                     <label class="flex items-center gap-3 cursor-pointer select-none">
                         <input type="checkbox" class="sr-only" />
                         <span data-role="box" class="inline-flex items-center justify-center size-6 rounded-full bg-white
-     border-2 border-main transition-colors">
+                        border-2 border-main transition-colors">
                             <svg data-role="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
                                 stroke-linecap="round" stroke-linejoin="round"
                                 class="size-4 text-main opacity-0 pointer-events-none" aria-hidden="true">
@@ -151,11 +167,10 @@
                             </svg>
                         </span>
                         <span data-role="label" class="flex-1 text-accents font-bold tracking-wide text-xl font-sec
-     decoration-main decoration-2 mt-3">
+                         decoration-main decoration-2 mt-3">
                             Smoke break?
                         </span>
                     </label>
-
                 </div>
                 <div class="mt-3 hover:cursor-pointer text-right">
                     <button type="button" data-template-save
@@ -165,7 +180,7 @@
             </div>
 
             <!-- CARD: Daytime -->
-            <div class="bg-white p-8 outline-4 outline-[#FECA6A] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
+            <div class="bg-white p-8 outline-4 outline-[#FF851B] rounded-lg relative transition-transform duration-300 ease-out transform-gpu origin-center will-change-transform"
                 data-checklist data-start="14" data-end="18" data-key="daytime">
                 <img src="images/mid.png" alt="Day Image"
                     class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-24" />
@@ -204,6 +219,7 @@
                 <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
                 <hr class="mt-4 border-1 w-[75%] mx-auto border-b border-main/40 rounded-full" />
                 <div class="mt-4" data-smoke>
+                    <!-- same smoke block as above -->
                     <label class="flex items-center gap-3 cursor-pointer select-none">
                         <input type="checkbox" class="sr-only" />
                         <span data-role="box" class="inline-flex items-center justify-center size-6 rounded-full bg-white
@@ -268,6 +284,7 @@
                 <ul class="mt-4 rounded-lg bg-white" data-checklist-list></ul>
                 <hr class="mt-4 border-1 w-[75%] mx-auto border-b border-main/40 rounded-full" />
                 <div class="mt-4" data-smoke>
+                    <!-- same smoke block -->
                     <label class="flex items-center gap-3 cursor-pointer select-none">
                         <input type="checkbox" class="sr-only" />
                         <span data-role="box" class="inline-flex items-center justify-center size-6 rounded-full bg-white
@@ -314,6 +331,13 @@
                                     </button>
                                 </div>
                             </div>
+                            <div class="mt-3">
+                                <button
+                                    class="text-white text-sm font-sec bg-maind rounded-full pt-3 px-4 shadow-2xl outline-gray-700/80 hover:cursor-pointer"
+                                    data-clear-checked type="button" aria-label="Clear checked (Work)">
+                                    Clear checked
+                                </button>
+                            </div>
                             <div class="mt-8">
                                 <form class="flex justify-between" data-checklist-form>
                                     <div class="flex flex-col">
@@ -344,6 +368,13 @@
                                             class="fa-solid fa-caret-up collapseCardCaret text-neutral scale-250 hover:cursor-pointer"></i>
                                     </button>
                                 </div>
+                            </div>
+                            <div class="mt-3">
+                                <button
+                                    class="text-white text-sm font-sec bg-maind rounded-full pt-3 px-4 shadow-2xl outline-gray-700/80 hover:cursor-pointer"
+                                    data-clear-checked type="button" aria-label="Clear checked (House)">
+                                    Clear checked
+                                </button>
                             </div>
                             <div class="mt-8">
                                 <form class="flex justify-between" data-checklist-form>
@@ -391,14 +422,16 @@
                             </div>
 
                             <!-- list-disc gives bullets; marker:text-main colors the bullets -->
-                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list>
+                            </ul>
                         </div>
+
                     </div>
                     <div class="w-[50%]">
                         <div class="bg-white p-8 outline-4 outline-accents rounded-lg relative" data-bullets
                             data-key="notes">
                             <img src="images/notes.png" alt="House Image"
-                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 h-16" />
+                                class="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2" />
                             <div class="flex justify-between">
                                 <h3
                                     class="text-4xl font-main font-bold text-main underline underline-offset-4 mb-4 mt-5 tracking-widest">
@@ -425,7 +458,8 @@
                             </div>
 
                             <!-- list-disc gives bullets; marker:text-main colors the bullets -->
-                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list></ul>
+                            <ul class="mt-4 rounded-lg bg-white list-disc marker:text-main pl-6" data-bullets-list>
+                            </ul>
                         </div>
                         <div class="bg-white mt-24 p-8 outline-4 outline-accents rounded-lg relative" data-checklist
                             data-key="shopping">
@@ -441,6 +475,13 @@
                                             class="fa-solid fa-caret-up collapseCardCaret text-neutral scale-250 hover:cursor-pointer"></i>
                                     </button>
                                 </div>
+                            </div>
+                            <div class="mt-3">
+                                <button
+                                    class="text-white text-sm font-sec bg-maind rounded-full pt-3 px-4 shadow-2xl outline-gray-700/80 hover:cursor-pointer"
+                                    data-clear-checked type="button" aria-label="Clear checked (Shopping)">
+                                    Clear checked
+                                </button>
                             </div>
                             <div class="mt-8">
                                 <form class="flex justify-between" data-checklist-form>
@@ -463,7 +504,8 @@
                     </div>
                 </div>
             </div>
-            <!-- PIC GOES HERE!-->
+
+
         </section>
 
     </div>

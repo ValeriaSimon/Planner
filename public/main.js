@@ -754,7 +754,7 @@ function setSmokesCount(n) {
 
 /* -------- Greeting + titles -------- */
 function updateGreeting() {
-  const h1 = document.getElementById("greeting") || document.querySelector("h1");
+  const h1 = document.getElementById("greeting") ;
   if (!h1) return;
   const hr = new Date().getHours();
   const MORNING_START = 6;
@@ -1928,7 +1928,7 @@ async function onEndDay() {
   await new Promise(r => setTimeout(r, 250));
 
   setBaseDate(getPlannerDate(1));
-  setTimeout(() => { location.href = "./index.html"; }, NAV_DELAY_MS);
+  setTimeout(() => { location.href = "./today.html"; }, NAV_DELAY_MS);
 }
 
 
