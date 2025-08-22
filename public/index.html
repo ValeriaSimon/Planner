@@ -529,7 +529,6 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // expose to main.js
         window.firebaseServices = {
             auth, db,
             GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
@@ -543,11 +542,7 @@
         bar.append(signIn, signOutBtn); document.body.append(bar);
         signIn.onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
         signOutBtn.onclick = () => signOut(auth);
-        onAuthStateChanged(auth, u => {
-            signIn.style.display = u ? 'none' : '';
-            signOutBtn.style.display = u ? '' : 'none';
-            if (window.startFirebaseSync) window.startFirebaseSync(u);
-        });
+        onAuthStateChanged(auth, u => { signIn.style.display = u ? 'none' : ''; signOutBtn.style.display = u ? '' : 'none'; if (window.startFirebaseSync) window.startFirebaseSync(u); });
     </script>
     <script src="main.js" defer></script>
 </body>
