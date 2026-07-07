@@ -113,6 +113,43 @@ function attemptLiveRefresh() {
 }
 const liveRefreshDebounced = debounce(attemptLiveRefresh, 250);
 
+// "Today" is decided by planner:baseDate, which lives in localStorage per-device (read
+// synchronously everywhere, so it can't be an async Firestore round-trip on every call). To
+// keep both devices on the same day, it's mirrored to Firestore here: whichever device ends
+// the day pushes the new value, and the other device picks it up and reloads onto it.
+async function syncBaseDate(user) {
+  const FB = window.firebaseServices;
+  const ref = FB.doc(FB.db, "users", user.uid, "meta", "baseDate");
+
+  function applyRemote(remoteISO) {
+    if (!remoteISO || remoteISO === localStorage.getItem("planner:baseDate")) return;
+    localStorage.setItem("planner:baseDate", remoteISO);
+    location.reload();
+  }
+
+  const snap = await FB.getDoc(ref);
+  if (snap.exists() && snap.data()?.value) {
+    applyRemote(snap.data().value);
+  } else {
+    // nothing shared yet -- this device's current value becomes the shared starting point
+    const localISO = localStorage.getItem("planner:baseDate");
+    if (localISO) await FB.setDoc(ref, { value: localISO });
+  }
+
+  FB.onSnapshot(ref, d => applyRemote(d.data()?.value));
+}
+
+// Called from onEndDay() right after advancing the local baseDate, so the other device's
+// syncBaseDate() listener picks up the new day.
+async function pushBaseDateToRemote() {
+  const FB = window.firebaseServices;
+  const u = FB?.auth?.currentUser;
+  if (!FB || !u) return;
+  const iso = localStorage.getItem("planner:baseDate");
+  if (!iso) return;
+  await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "baseDate"), { value: iso });
+}
+
 window.startFirebaseSync = function startFirebaseSync(user) {
   const FB = window.firebaseServices;
   if (!FB || !user) return;
@@ -120,6 +157,8 @@ window.startFirebaseSync = function startFirebaseSync(user) {
   // prevent duplicate listeners across re-inits
   window.__fbUnsubs?.forEach(fn => { try { fn(); } catch { } });
   window.__fbUnsubs = [];
+
+  syncBaseDate(user);
 
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const today = fmt(getPlannerDate(0));
@@ -1960,6 +1999,7 @@ async function onEndDay() {
   }
 
   setBaseDate(getPlannerDate(1));
+  await pushBaseDateToRemote();
   setTimeout(() => { location.href = "./today.html"; }, NAV_DELAY_MS);
 }
 
