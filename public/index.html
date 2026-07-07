@@ -20,17 +20,25 @@
             <h1 class="text-9xl text-nowrap font-main text-main underline py-4 text-shadow-lg text-shadow-black/20">
                 Sign in!
             </h1>
-            <button type="button" id="google-signin"
-                class="mt-15 bg-white  text-main px-24 py-6 rounded-full shadow-inner shadow-inner-xl shadow-black/40 hover:bg-main hover:text-white">
-                <i class="fa-brands fa-google text-4xl"></i>
-            </button>
+            <form id="household-signin-form" class="mt-15 flex flex-col items-center gap-4">
+                <input type="password" id="household-password" placeholder="Household password" autocomplete="current-password"
+                    class="text-center text-2xl font-sec px-6 py-4 rounded-full bg-white text-main shadow-inner shadow-inner-xl shadow-black/40 focus:outline-none" />
+                <button type="submit"
+                    class="bg-white text-main px-16 py-4 rounded-full font-sec text-2xl shadow-inner shadow-inner-xl shadow-black/40 hover:bg-main hover:text-white transition-colors">
+                    Enter
+                </button>
+            </form>
         </div>
     </section>
     <!-- Firebase boot + bridge -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+
+        // Single shared household account. Both people sign in with the same password;
+        // this email is just an identifier Firebase Auth requires, never shown in the UI.
+        const HOUSEHOLD_EMAIL = "bebii@home.com";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDW5xBcbpHzWrFpO8LDA4vVt8qeenGqosw",
@@ -47,24 +55,31 @@
 
         window.firebaseServices = {
             auth, db,
-            GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
+            onAuthStateChanged, signOut,
             doc, setDoc, getDoc, onSnapshot, collection
         };
 
-        // tiny auth UI
+        // tiny auth UI (sign-out only; signing in happens via the password form below)
         const bar = Object.assign(document.createElement('div'), { style: 'position:fixed;top:8px;right:8px;z-index:9999' });
-        const signIn = Object.assign(document.createElement('button'), { textContent: 'Sign in' });
-        const signOutBtn = Object.assign(document.createElement('button'), { textContent: 'Sign out', style: 'margin-left:6px;display:none' });
-        bar.append(signIn, signOutBtn); document.body.append(bar);
-        signIn.onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+        const signOutBtn = Object.assign(document.createElement('button'), { textContent: 'Sign out', style: 'display:none' });
+        bar.append(signOutBtn); document.body.append(bar);
         signOutBtn.onclick = () => signOut(auth);
-        document.getElementById('google-signin')
-            ?.addEventListener('click', () =>
-                signInWithPopup(auth, new GoogleAuthProvider()));
+
+        document.getElementById('household-signin-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const pwInput = document.getElementById('household-password');
+            const password = pwInput?.value || '';
+            if (!password) return;
+            try {
+                await signInWithEmailAndPassword(auth, HOUSEHOLD_EMAIL, password);
+            } catch {
+                alert('Wrong password.');
+                if (pwInput) { pwInput.value = ''; pwInput.focus(); }
+            }
+        });
 
         // route + sync
         onAuthStateChanged(auth, u => {
-            signIn.style.display = u ? 'none' : '';
             signOutBtn.style.display = u ? '' : 'none';
 
             const here = (location.pathname.split('/').pop() || 'index.html').toLowerCase();

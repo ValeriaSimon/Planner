@@ -121,3 +121,33 @@ Export format includes `{ version, date, day, bullets, notes }`.
 - Inline edit with Enter=save, Escape=cancel.  
 - “Plan tomorrow” and “Back to current day” links switch offset.  
 - Download buttons always snapshot before saving.
+
+## 6. Card Input Commands (typed syntax)
+Typed into a card's "Add" field before submitting, or inline while editing an existing item. (Functions: `parseMultilineEntries()`, `parseItemAndTags()`, `parseFolderDelete()`, `normalizeFolderPath()`.)
+
+### Folder cards — Work, Home, Shopping, Food/Menu, Notes
+Time cards (Morning/Daytime/Evening) don't support any of this — see below.
+
+- **Add a plain item** — type text, press Add (or Enter). No `#`/`-` syntax needed.
+- **Add multiple items at once** — separate with a comma or newline: `Milk, Eggs, Bread` adds three separate items in one submit.
+- **File an item into a folder** — append `#folderName`: `Buy a gift #ideas` creates/uses an "Ideas" folder and files the item there.
+- **File an item into multiple folders at once** — append more than one tag: `Book flights #travel #work` creates the same item once inside each folder.
+- **Share one tag across a batch** — if only the *last* item in a comma/newline batch carries a tag, it's applied to all the untagged ones before it: `Pasta, Tacos, Salad #dinner` files all three under "Dinner". Doesn't trigger if any earlier item already has its own tag.
+- **Create an empty folder** — type just the tag with no item text: `#groceries` creates the "Groceries" header with nothing in it yet.
+- **Delete a folder** — `-folderName`: removes the folder header and moves any items inside it to Unfiled. `-unfiled` is blocked while Unfiled still has items.
+- **Move an existing item to a different folder** — click ✎ to edit, add/change the `#folder` tag in the text, then Enter (or click away) to commit — Escape cancels. Only the first tag found is used to reroute; editing without a `#tag` just updates the text and keeps the current folder.
+- **Reorder or re-file by dragging** — drag an item's `⋮⋮` handle to reorder within a folder, or drop it under a different folder's header to re-file it.
+
+### Folder name rules
+- Case-insensitive; normalized to lowercase with spaces turned into hyphens (`#Grocery List` → `grocery-list`, displayed as "Grocery List").
+- Allowed characters: letters, digits, spaces, `_`, `-`, `/`. Anything else is stripped.
+- Max 48 characters.
+- The name "unfiled" is reserved — tagging `#unfiled` is the same as leaving an item untagged.
+
+### Time cards — Morning, Daytime, Evening
+- Plain text only. `#` and `-` have no special meaning here; folders are disabled entirely on these three cards.
+
+### Collapsing (not typed, but related)
+- Click a folder header's caret to collapse/expand just that folder.
+- Alt-click (or Cmd/Meta-click) any folder caret to collapse/expand *every* folder on that card at once.
+- Click a card's own caret (top-right) to collapse/expand the whole card; non-time cards remember this per day.

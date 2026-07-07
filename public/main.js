@@ -177,6 +177,94 @@ const TPL_KEY = "planner:templates:v1";
 const readTemplates = () => loadJSON(TPL_KEY, {});
 const saveTemplates = (obj) => saveJSON(TPL_KEY, obj);
 
+// Time cards only: Save current items as a named template; Apply inserts missing
+// items from a saved template; Delete removes it. (data-template-save / data-template-menu)
+function wireTemplates(card) {
+  const cardKey = card.dataset.key;
+  if (!TIME_KEYS.includes(cardKey)) return;
+  if (card.__wiredTemplates) return;
+  card.__wiredTemplates = true;
+
+  const list = card.querySelector("[data-checklist-list]");
+  const saveBtn = card.querySelector("[data-template-save]");
+  const menuBtn = card.querySelector("[data-template-menu]");
+  if (!list) return;
+
+  function currentTexts() {
+    return [...list.querySelectorAll("li[data-folder] [data-role='label']")]
+      .map((n) => (n.textContent || "").trim())
+      .filter(Boolean);
+  }
+
+  saveBtn?.addEventListener("click", () => {
+    const name = (prompt("Save this list as a template named:") || "").trim();
+    if (!name) return;
+    const items = currentTexts();
+    if (!items.length) { alert("Nothing to save yet."); return; }
+    const all = readTemplates();
+    all[cardKey] = all[cardKey] || {};
+    all[cardKey][name] = items;
+    saveTemplates(all);
+  });
+
+  let menu = null;
+  function onDocClick(e) {
+    if (menu && !menu.contains(e.target) && e.target !== menuBtn && !menuBtn?.contains(e.target)) closeMenu();
+  }
+  function closeMenu() {
+    menu?.remove();
+    menu = null;
+    document.removeEventListener("click", onDocClick);
+  }
+
+  function applyTemplate(name) {
+    const items = (readTemplates()[cardKey] || {})[name] || [];
+    const existing = new Set(currentTexts().map(_norm));
+    const add = card.__addChecklistItem;
+    items.forEach((text) => { if (!existing.has(_norm(text))) add && add(capFirst(text), false, false, ""); });
+  }
+
+  function deleteTemplate(name) {
+    const all = readTemplates();
+    if (all[cardKey]) delete all[cardKey][name];
+    saveTemplates(all);
+  }
+
+  function openMenu() {
+    closeMenu();
+    const names = Object.keys(readTemplates()[cardKey] || {});
+    menu = el("div", "absolute right-0 mt-2 bg-white rounded-lg shadow-xl z-20 min-w-[10rem] py-1 text-left");
+
+    if (!names.length) {
+      menu.append(el("div", "px-3 py-2 text-sm text-neutral/60 whitespace-nowrap", "No templates yet"));
+    } else {
+      names.forEach((name) => {
+        const row = el("div", "flex items-center justify-between gap-3 px-3 py-2 hover:bg-neutral/10 whitespace-nowrap");
+        const applyBtn = el("button", "text-left flex-1 text-neutral font-sec", name);
+        applyBtn.type = "button";
+        applyBtn.title = `Apply "${name}"`;
+        const delBtn = el("button", "text-red-400 hover:text-red-600", "✕");
+        delBtn.type = "button";
+        delBtn.title = `Delete "${name}"`;
+        applyBtn.addEventListener("click", () => { applyTemplate(name); closeMenu(); });
+        delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteTemplate(name); openMenu(); });
+        row.append(applyBtn, delBtn);
+        menu.appendChild(row);
+      });
+    }
+
+    const anchor = menuBtn.parentElement;
+    anchor.style.position = "relative";
+    anchor.appendChild(menu);
+    document.addEventListener("click", onDocClick);
+  }
+
+  menuBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menu) closeMenu(); else openMenu();
+  });
+}
+
 
 const _norm = (s) => (s || "").trim().toLowerCase();
 
@@ -190,7 +278,7 @@ function carryKey(textOrItem, folder = undefined) {
 /* -------- File System Access + IndexedDB handle storage -------- */
 const FS_DB = "plannerFS";
 const FS_STORE = "handles";
-const FS_KEYS = { OPEN_START: "planner:lastOpenStartIn" };
+const FS_KEYS = { OPEN_START: "planner:lastOpenStartIn", ARCHIVE_ROOT: "planner:archiveRootDir" };
 
 
 const idb = {
@@ -261,6 +349,58 @@ function buildExport(offset) {
       notes: loadJSON(GLOBAL_NOTES_KEY, []),
     },
   };
+}
+
+/* -------- Archive folder (File System Access API, Chromium-only) -------- */
+// One-time picked root dir (e.g. "D:\Planner Archive"); End Day writes into <root>/<MonthYear>/.
+function monthYearFolderName(d = new Date()) {
+  return `${d.toLocaleString("en-US", { month: "long" })}${d.getFullYear()}`;
+}
+
+async function getArchiveRootHandle() {
+  if (!window.showDirectoryPicker) return null;
+  try {
+    const handle = await idb.get(FS_KEYS.ARCHIVE_ROOT);
+    if (!handle?.queryPermission) return null;
+    let perm = await handle.queryPermission({ mode: "readwrite" });
+    if (perm === "prompt") perm = await handle.requestPermission({ mode: "readwrite" });
+    return perm === "granted" ? handle : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setArchiveRootHandle() {
+  if (!window.showDirectoryPicker) {
+    alert("Your browser doesn't support picking a folder for auto-export (Chrome/Edge only).");
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    await idb.put(FS_KEYS.ARCHIVE_ROOT, handle);
+    alert(`Archive folder set to "${handle.name}". End Day will now save here automatically.`);
+  } catch {
+    // user cancelled the picker; nothing to do
+  }
+}
+
+async function writeJSONToArchive(rootHandle, filename, payload) {
+  const monthDir = await rootHandle.getDirectoryHandle(monthYearFolderName(), { create: true });
+  const fileHandle = await monthDir.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(payload, null, 2));
+  await writable.close();
+}
+
+// Export a day into the archive folder; falls back to the normal blob download on any failure.
+async function archiveDay(rootHandle, offset) {
+  const { filename, payload } = buildExport(offset);
+  try {
+    await writeJSONToArchive(rootHandle, filename, payload);
+  } catch (err) {
+    console.warn("Archive write failed, falling back to download:", err);
+    saveViaHref(filename, payload);
+  }
 }
 
 // Reuse the same download interaction as the buttons
@@ -619,8 +759,9 @@ function moveItemToFolder(li, destKey, cardKey, list, onSave = snapshotDay) {
   // reinsert after that folder's header if present; else append
   const headerSel = destKey ? `[data-folder-header="${destKey}"]` : `[data-folder-header="__none"]`;
   const header = list.querySelector(headerSel);
-  // append after last item in destination folder if any
-  const destItems = [...list.querySelectorAll(`li[data-folder="${destKey}"]`)];
+  // append after last OTHER item already in destination folder, if any
+  // (li itself now carries destKey too, so it must be excluded or it'd insert-before-itself as a no-op)
+  const destItems = [...list.querySelectorAll(`li[data-folder="${destKey}"]`)].filter((n) => n !== li);
   const last = destItems.length ? destItems[destItems.length - 1] : null;
   if (last) list.insertBefore(li, last.nextSibling);
   else if (header) list.insertBefore(li, header.nextSibling);
@@ -1790,11 +1931,17 @@ async function onEndDay() {
   tomorrowData.__carried = carriedMeta;
   saveJSON(tomorrowKey, tomorrowData);
 
-  // Sequential downloads; give the browser time to dispatch each
-  downloadDayViaHref(0);
-  await new Promise(r => setTimeout(r, 200));
-  downloadDayViaHref(1);
-  await new Promise(r => setTimeout(r, 250));
+  const archiveRoot = await getArchiveRootHandle();
+  if (archiveRoot) {
+    await archiveDay(archiveRoot, 0);
+    await archiveDay(archiveRoot, 1);
+  } else {
+    // Sequential downloads; give the browser time to dispatch each
+    downloadDayViaHref(0);
+    await new Promise(r => setTimeout(r, 200));
+    downloadDayViaHref(1);
+    await new Promise(r => setTimeout(r, 250));
+  }
 
   setBaseDate(getPlannerDate(1));
   setTimeout(() => { location.href = "./today.html"; }, NAV_DELAY_MS);
@@ -1820,6 +1967,7 @@ document.addEventListener("DOMContentLoaded", () => {
   rebuildHeaderFromStorage();
   migrateUIState();
   document.querySelectorAll("[data-checklist],[data-bullets]").forEach(wireCard);
+  document.querySelectorAll("[data-checklist][data-key]").forEach(wireTemplates);
   document.querySelectorAll("[data-countdown]").forEach(wireCountdown);
   wireCarets();
 
@@ -1849,6 +1997,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (act === "download") { snapshotDayImmediate(); downloadDayViaHref(DAY_OFFSET); }
     else if (act === "restore") onRestore();
     else if (act === "endday") onEndDay();
+    else if (act === "set-archive-folder") setArchiveRootHandle();
   });
 
 });

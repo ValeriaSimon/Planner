@@ -128,7 +128,7 @@
                            hover:bg-neutral transition-colors duration-300">
                             Add
                         </button>
-                        <button type="button" class="my-auto flex gap-1">
+                        <button type="button" data-template-menu class="my-auto flex gap-1">
                             <i class="fa-solid fa-folder-open" style="color: #1C2317;">
                             </i>
                             <i class="fa-solid fa-caret-down" style="color: #1C2317;"></i>
@@ -193,7 +193,7 @@
                            hover:bg-neutral transition-colors duration-300">
                             Add
                         </button>
-                        <button type="button" class="my-auto flex gap-1">
+                        <button type="button" data-template-menu class="my-auto flex gap-1">
                             <i class="fa-solid fa-folder-open" style="color: #1C2317;">
                             </i>
                             <i class="fa-solid fa-caret-down" style="color: #1C2317;"></i>
@@ -257,7 +257,7 @@
                            hover:bg-neutral transition-colors duration-300">
                             Add
                         </button>
-                        <button type="button" class="my-auto flex gap-1">
+                        <button type="button" data-template-menu class="my-auto flex gap-1">
                             <i class="fa-solid fa-folder-open" style="color: #1C2317;">
                             </i>
                             <i class="fa-solid fa-caret-down" style="color: #1C2317;"></i>
@@ -471,7 +471,7 @@
     <!-- Firebase boot + bridge -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+        import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -489,20 +489,17 @@
 
         window.firebaseServices = {
             auth, db,
-            GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
+            onAuthStateChanged, signOut,
             doc, setDoc, getDoc, onSnapshot, collection
         };
 
-        // tiny auth UI
+        // tiny auth UI (sign-out only; signing in happens on index.html's password form)
         const bar = Object.assign(document.createElement('div'), { style: 'position:fixed;top:8px;right:8px;z-index:9999' });
-        const signIn = Object.assign(document.createElement('button'), { textContent: 'Sign in' });
-        const signOutBtn = Object.assign(document.createElement('button'), { textContent: 'Sign out', style: 'margin-left:6px;display:none' });
-        bar.append(signIn, signOutBtn); document.body.append(bar);
-        signIn.onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+        const signOutBtn = Object.assign(document.createElement('button'), { textContent: 'Sign out', style: 'display:none' });
+        bar.append(signOutBtn); document.body.append(bar);
         signOutBtn.onclick = () => signOut(auth);
         // route + sync
         onAuthStateChanged(auth, u => {
-            signIn.style.display = u ? 'none' : '';
             signOutBtn.style.display = u ? '' : 'none';
 
             const here = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
