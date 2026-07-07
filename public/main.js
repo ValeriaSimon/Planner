@@ -202,8 +202,7 @@ function wireTemplates(card) {
     const items = currentTexts();
     if (!items.length) { alert("Nothing to save yet."); return; }
     const all = readTemplates();
-    all[cardKey] = all[cardKey] || {};
-    all[cardKey][name] = items;
+    all[name] = items;
     saveTemplates(all);
   });
 
@@ -218,7 +217,7 @@ function wireTemplates(card) {
   }
 
   function applyTemplate(name) {
-    const items = (readTemplates()[cardKey] || {})[name] || [];
+    const items = readTemplates()[name] || [];
     const existing = new Set(currentTexts().map(_norm));
     const add = card.__addChecklistItem;
     items.forEach((text) => { if (!existing.has(_norm(text))) add && add(capFirst(text), false, false, ""); });
@@ -226,13 +225,13 @@ function wireTemplates(card) {
 
   function deleteTemplate(name) {
     const all = readTemplates();
-    if (all[cardKey]) delete all[cardKey][name];
+    delete all[name];
     saveTemplates(all);
   }
 
   function openMenu() {
     closeMenu();
-    const names = Object.keys(readTemplates()[cardKey] || {});
+    const names = Object.keys(readTemplates());
     menu = el("div", "absolute right-0 mt-2 bg-white rounded-lg shadow-xl z-20 min-w-[10rem] py-1 text-left");
 
     if (!names.length) {
@@ -734,6 +733,28 @@ function ensureUnfiledHeaderIfNeeded(list, cardKey) {
   return ensureFolderHeader(list, cardKey, UNFILED_KEY);
 }
 
+// Non-time checklist cards only: sink checked items to the bottom of their own
+// folder group, float unchecked ones back above the first checked item in that group.
+function moveItemByCheckedState(li, cardKey, list) {
+  if (TIME_KEYS.includes(cardKey)) return;
+  const folder = li.dataset.folder || "";
+  const mates = [...list.querySelectorAll(`li[data-folder="${folder}"]`)].filter((n) => n !== li);
+  const checked = !!li.querySelector('input[type="checkbox"]')?.checked;
+
+  if (checked) {
+    const last = mates.length ? mates[mates.length - 1] : null;
+    if (last) list.insertBefore(li, last.nextSibling);
+  } else {
+    const firstCheckedMate = mates.find((n) => n.querySelector('input[type="checkbox"]')?.checked);
+    if (firstCheckedMate) {
+      list.insertBefore(li, firstCheckedMate);
+    } else {
+      const last = mates.length ? mates[mates.length - 1] : null;
+      if (last) list.insertBefore(li, last.nextSibling);
+    }
+  }
+}
+
 function moveItemToFolder(li, destKey, cardKey, list, onSave = snapshotDay) {
   const label = li.querySelector('[data-role="label"]');
   const norm = _norm((label?.textContent || "").trim());
@@ -1060,6 +1081,10 @@ function wireChecklist(root) {
 
     cb.addEventListener("change", () => {
       syncTick();
+      if (!isTimeCard) {
+        li.classList.toggle("opacity-60", cb.checked);
+        moveItemByCheckedState(li, cardKey, list);
+      }
       if (!suppressSave) snapshotDayImmediate();
     });
 
@@ -1160,6 +1185,10 @@ function wireChecklist(root) {
 
     suppressSave = true;
     cb.checked = !!done; syncTick();
+    if (!isTimeCard) {
+      li.classList.toggle("opacity-60", cb.checked);
+      moveItemByCheckedState(li, cardKey, list);
+    }
     suppressSave = false;
 
     if (!restoring) syncCountsAndSave(false);
