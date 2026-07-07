@@ -93,6 +93,26 @@ async function saveJSON(key, value) {
 
 
 // live-fill the cache on sign-in
+// Live refresh: when the other signed-in device changes something visible on this page,
+// re-render from the freshly-synced data instead of waiting for a manual reload. Guarded so
+// it never yanks a list out from under an active edit or an in-progress drag.
+function isSafeToRerenderNow() {
+  if (DRAG_SRC) return false;
+  if (ENDING_DAY) return false;
+  if (document.querySelector('[contenteditable="true"]')) return false;
+  return true;
+}
+let liveRefreshRetries = 0;
+function attemptLiveRefresh() {
+  if (!isSafeToRerenderNow()) {
+    if (liveRefreshRetries++ < 10) setTimeout(attemptLiveRefresh, 1500);
+    return;
+  }
+  liveRefreshRetries = 0;
+  restoreAll();
+}
+const liveRefreshDebounced = debounce(attemptLiveRefresh, 250);
+
 window.startFirebaseSync = function startFirebaseSync(user) {
   const FB = window.firebaseServices;
   if (!FB || !user) return;
@@ -109,27 +129,40 @@ window.startFirebaseSync = function startFirebaseSync(user) {
 
   daysToWatch.forEach(async ds => {
     const dayKeyStr = `planner:${ds}`;
+    const isCurrentPageDay = ds === currentDS;
     const ref = FB.doc(FB.db, "users", user.uid, "days", ds);
     const snap = await FB.getDoc(ref);
     REMOTE_CACHE.set(dayKeyStr, snap.exists() ? (snap.data() || {}) : {});
 
     // store unsubs so repeated inits don't stack listeners
     const unsubDay = FB.onSnapshot(ref, d => {
-      REMOTE_CACHE.set(dayKeyStr, d.exists() ? (d.data() || {}) : {});
+      const next = d.exists() ? (d.data() || {}) : {};
+      const changed = JSON.stringify(REMOTE_CACHE.get(dayKeyStr)) !== JSON.stringify(next);
+      REMOTE_CACHE.set(dayKeyStr, next);
+      if (changed && isCurrentPageDay) liveRefreshDebounced();
     });
     window.__fbUnsubs.push(unsubDay);
 
     const col = FB.collection(FB.db, "users", user.uid, "days", ds, "bullets");
     const unsubBullets = FB.onSnapshot(col, qs => {
+      let changed = false;
       qs.forEach(docSnap => {
-        REMOTE_CACHE.set(`planner:${ds}:bullets:${docSnap.id}`, docSnap.data()?.items || []);
+        const bulletsKeyStr = `planner:${ds}:bullets:${docSnap.id}`;
+        const next = docSnap.data()?.items || [];
+        if (JSON.stringify(REMOTE_CACHE.get(bulletsKeyStr)) !== JSON.stringify(next)) changed = true;
+        REMOTE_CACHE.set(bulletsKeyStr, next);
       });
+      if (changed && isCurrentPageDay) liveRefreshDebounced();
     });
     window.__fbUnsubs.push(unsubBullets);
   });
 
-  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "notes"),
-    d => REMOTE_CACHE.set("planner:notes", d.data()?.items || []));
+  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "notes"), d => {
+    const next = d.data()?.items || [];
+    const changed = JSON.stringify(REMOTE_CACHE.get("planner:notes")) !== JSON.stringify(next);
+    REMOTE_CACHE.set("planner:notes", next);
+    if (changed) liveRefreshDebounced();
+  });
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "countdown"),
     d => REMOTE_CACHE.set("planner:countdown", d.data() || null));
 };
@@ -1059,7 +1092,9 @@ function wireRowDragReorder(li, labelEl, list, { itemId, isTimeCard = false, onM
 // "#folder" tags out of the edited text and reroutes via moveItemToFolder when they change.
 // onEditStart/onEditEnd let checklist rows disable their checkbox + label `for` while editing;
 // bullets (no checkbox) simply omit them.
-function wireRowInlineEdit(li, labelEl, edit, { cardKey, list, isTimeCard = false, onEditStart, onEditEnd, save, moveOnSave }) {
+// Card/list/isTimeCard are resolved fresh from the DOM at commit time rather than passed in:
+// the row may have been dragged into a different card since it was wired (e.g. Beba -> Morning).
+function wireRowInlineEdit(li, labelEl, edit, { onEditStart, onEditEnd, save, moveOnSave }) {
   edit.addEventListener("click", () => {
     if (labelEl.isContentEditable) return;
     const original = labelEl.textContent;
@@ -1072,13 +1107,18 @@ function wireRowInlineEdit(li, labelEl, edit, { cardKey, list, isTimeCard = fals
       labelEl.textContent = (labelEl.textContent || "").trim();
       if (!labelEl.textContent) { li.remove(); save(false); edit.focus(); cleanup(); return; }
 
-      const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard });
+      const curCard = li.closest("[data-checklist],[data-bullets]");
+      const curCardKey = curCard?.dataset.key || "";
+      const curList = li.closest("[data-checklist-list],[data-bullets-list]");
+      const curIsTimeCard = TIME_KEYS.includes(curCardKey);
+
+      const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard: curIsTimeCard });
       labelEl.textContent = capFirst(parsed.text || "");
       // Only reroute when a folder tag is explicitly present; otherwise keep existing folder
-      if (!isTimeCard && parsed.folders && parsed.folders.length) {
+      if (!curIsTimeCard && curList && parsed.folders && parsed.folders.length) {
         const dest = parsed.folders[0];
         if (String(li.dataset.folder || "") !== String(dest)) {
-          moveItemToFolder(li, dest, cardKey, list, moveOnSave);
+          moveItemToFolder(li, dest, curCardKey, curList, moveOnSave);
         }
       }
       labelEl.contentEditable = "false";
@@ -1195,15 +1235,21 @@ function wireChecklist(root) {
 
     cb.addEventListener("change", () => {
       syncTick();
-      if (!isTimeCard) {
+      // Re-resolve card/list from the DOM rather than the closure: the row may have been
+      // dragged into a different card since it was created (e.g. Beba -> Morning), and the
+      // closure's own `cardKey`/`list`/`isTimeCard` would otherwise still point at its origin.
+      const curCard = li.closest("[data-checklist][data-key]");
+      const curCardKey = curCard?.dataset.key ?? cardKey;
+      const curList = li.closest("[data-checklist-list]") ?? list;
+      const curIsTimeCard = TIME_KEYS.includes(curCardKey);
+      if (!curIsTimeCard) {
         li.classList.toggle("opacity-60", cb.checked);
-        moveItemByCheckedState(li, cardKey, list);
+        moveItemByCheckedState(li, curCardKey, curList);
       }
       if (!suppressSave) snapshotDayImmediate();
     });
 
     wireRowInlineEdit(li, labelEl, edit, {
-      cardKey, list, isTimeCard,
       onEditStart: () => { row.removeAttribute("for"); cb.disabled = true; },
       onEditEnd: () => { row.setAttribute("for", itemId); cb.disabled = false; },
       save: syncCountsAndSave,
@@ -1337,7 +1383,6 @@ function wireBullets(root) {
     del.type = "button"; del.title = `Remove "${text}"`;
 
     wireRowInlineEdit(li, labelEl, edit, {
-      cardKey: key, list,
       save: persist,
       moveOnSave: () => persist(false),
     });
