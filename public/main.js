@@ -1,4 +1,6 @@
 /* main.js — consolidated */
+(function () {
+  "use strict";
 
 /* -------- Day offset from HTML -------- */
 function getPageOffset() {
@@ -755,6 +757,27 @@ function moveItemByCheckedState(li, cardKey, list) {
   }
 }
 
+// Ensure a folder header exists (skipped for time cards, which have no folders/headers),
+// then place `li` after the last other item already in that folder group, or after the
+// header if the group was otherwise empty, or at the end of the list as a last resort.
+// Always excludes `li` itself from the "last match" search, so this is safe whether `li` is
+// a brand-new node not yet in `list`, or an existing node already inside it (being moved).
+function insertIntoFolderGroup(list, li, folderKey, cardKey) {
+  const isTimeCard = TIME_KEYS.includes(cardKey);
+  if (!isTimeCard) ensureFolderHeader(list, cardKey, folderKey);
+
+  const mates = [...list.querySelectorAll(`li[data-folder="${folderKey}"]`)].filter((n) => n !== li);
+  const last = mates.length ? mates[mates.length - 1] : null;
+  if (last) { list.insertBefore(li, last.nextSibling); return; }
+
+  if (!isTimeCard) {
+    const header = list.querySelector(folderKey ? `[data-folder-header="${folderKey}"]` : `[data-folder-header="__none"]`);
+    if (header) { list.insertBefore(li, header.nextSibling); return; }
+  }
+
+  list.appendChild(li);
+}
+
 function moveItemToFolder(li, destKey, cardKey, list, onSave = snapshotDay) {
   const label = li.querySelector('[data-role="label"]');
   const norm = _norm((label?.textContent || "").trim());
@@ -768,25 +791,8 @@ function moveItemToFolder(li, destKey, cardKey, list, onSave = snapshotDay) {
     return;
   }
 
-  // ensure destination header exists (non-time cards only)
-  const isTimeCard = TIME_KEYS.includes(cardKey);
-  if (!isTimeCard) {
-    if (destKey === UNFILED_KEY) ensureUnfiledHeaderIfNeeded(list, cardKey);
-    else ensureFolderHeader(list, cardKey, destKey);
-  }
-
   li.dataset.folder = destKey;
-
-  // reinsert after that folder's header if present; else append
-  const headerSel = destKey ? `[data-folder-header="${destKey}"]` : `[data-folder-header="__none"]`;
-  const header = list.querySelector(headerSel);
-  // append after last OTHER item already in destination folder, if any
-  // (li itself now carries destKey too, so it must be excluded or it'd insert-before-itself as a no-op)
-  const destItems = [...list.querySelectorAll(`li[data-folder="${destKey}"]`)].filter((n) => n !== li);
-  const last = destItems.length ? destItems[destItems.length - 1] : null;
-  if (last) list.insertBefore(li, last.nextSibling);
-  else if (header) list.insertBefore(li, header.nextSibling);
-  else list.appendChild(li);
+  insertIntoFolderGroup(list, li, destKey, cardKey);
 
   updateFolderCounts(list);
   onSave();
@@ -947,13 +953,13 @@ const syncTomorrowDebounced = debounce((mode) => syncTomorrowFromToday(mode), 20
 
 
 function getSmokesCountFromDOM() {
-  const el = document.getElementById("smokescount");
-  const n = parseInt(el?.textContent || "0", 10);
+  const countEl = document.getElementById("smokescount");
+  const n = parseInt(countEl?.textContent || "0", 10);
   return Number.isFinite(n) ? n : 0;
 }
 function setSmokesCount(n) {
-  const el = document.getElementById("smokescount");
-  if (el) el.textContent = String(n);
+  const countEl = document.getElementById("smokescount");
+  if (countEl) countEl.textContent = String(n);
 }
 
 /* -------- Greeting + titles -------- */
@@ -1013,6 +1019,114 @@ function highlightCurrentBlock() {
     return hr >= start && hr < end;
   });
   if (active) active.classList.add("scale-105", "z-10", "shadow-xl");
+}
+
+/* -------- Shared row behavior (checklist items + bullets share these) -------- */
+
+// Drag-to-reorder within a list, and drag-across-folder-headers to re-file.
+// Identical for checklist and bullet rows; only the post-move save differs.
+function wireRowDragReorder(li, labelEl, list, { itemId, isTimeCard = false, onMoved }) {
+  li.addEventListener("dragstart", (e) => {
+    const t = e.target;
+    if (labelEl.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
+    DRAG_SRC = li;
+    li.classList.add("opacity-50");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", itemId);
+  });
+  li.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+  li.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (!DRAG_SRC || DRAG_SRC === li) return;
+    const items = [...list.children];
+    const src = items.indexOf(DRAG_SRC);
+    const dst = items.indexOf(li);
+    if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling); else list.insertBefore(DRAG_SRC, li);
+
+    // compute new folder by scanning previous headers
+    let p = DRAG_SRC.previousElementSibling; let newKey = "";
+    while (p) {
+      if (p.hasAttribute("data-folder-header")) { newKey = (p.dataset.folderHeader === "__none") ? "" : p.dataset.folderHeader; break; }
+      p = p.previousElementSibling;
+    }
+    DRAG_SRC.setAttribute("data-folder", isTimeCard ? "" : newKey);
+    onMoved();
+  });
+  li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
+}
+
+// Click-to-edit commit/cancel/keydown, shared by checklist and bullet rows. Commit re-parses
+// "#folder" tags out of the edited text and reroutes via moveItemToFolder when they change.
+// onEditStart/onEditEnd let checklist rows disable their checkbox + label `for` while editing;
+// bullets (no checkbox) simply omit them.
+function wireRowInlineEdit(li, labelEl, edit, { cardKey, list, isTimeCard = false, onEditStart, onEditEnd, save, moveOnSave }) {
+  edit.addEventListener("click", () => {
+    if (labelEl.isContentEditable) return;
+    const original = labelEl.textContent;
+    labelEl.contentEditable = "true";
+    labelEl.classList.add("outline-none");
+    onEditStart?.();
+    labelEl.focus(); placeCaretEnd(labelEl);
+
+    function commit() {
+      labelEl.textContent = (labelEl.textContent || "").trim();
+      if (!labelEl.textContent) { li.remove(); save(false); edit.focus(); cleanup(); return; }
+
+      const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard });
+      labelEl.textContent = capFirst(parsed.text || "");
+      // Only reroute when a folder tag is explicitly present; otherwise keep existing folder
+      if (!isTimeCard && parsed.folders && parsed.folders.length) {
+        const dest = parsed.folders[0];
+        if (String(li.dataset.folder || "") !== String(dest)) {
+          moveItemToFolder(li, dest, cardKey, list, moveOnSave);
+        }
+      }
+      labelEl.contentEditable = "false";
+      onEditEnd?.();
+      save(false);
+      edit.focus();
+      labelEl.classList.remove("outline-none");
+      cleanup();
+    }
+    function cancel() {
+      labelEl.textContent = original;
+      labelEl.contentEditable = "false";
+      onEditEnd?.();
+      edit.focus();
+      labelEl.classList.remove("outline-none");
+      cleanup();
+    }
+    function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
+    function cleanup() { labelEl.removeEventListener("keydown", onKey); labelEl.removeEventListener("blur", commit); }
+    labelEl.addEventListener("keydown", onKey);
+    labelEl.addEventListener("blur", commit);
+  });
+}
+
+// Shared "process a submitted add-form blob" flow for checklist and bullets: splits into
+// entries, handles "-folder" deletes and folder-only (no text) lines, dedupes against
+// existing items per destination folder, and fans an item out across multiple tags.
+// `addItem(text, folder)` is a 2-arg adapter each caller provides over its own addItem shape.
+function processEntries(raw, { list, cardKey, isTimeCard = false, addItem, save, deleteOnSave }) {
+  const entries = parseMultilineEntries(raw, { isTimeCard });
+
+  entries.forEach(({ del, text, folders }) => {
+    if (isTimeCard) { if (text) addItem(capFirst(text), ""); return; }
+    if (del) { deleteFolderCommand(list, cardKey, del, deleteOnSave); return; }
+
+    const haveFolders = folders && folders.length;
+    if (!text) {
+      if (haveFolders) { folders.forEach(f => ensureFolderHeader(list, cardKey, f)); save(false); }
+      return;
+    }
+
+    const norm = _norm(capFirst(text));
+    if (haveFolders) {
+      folders.forEach(f => { if (!findDupInFolder(list, f, norm)) addItem(capFirst(text), f); });
+    } else {
+      if (!findDupInFolder(list, "", norm)) addItem(capFirst(text), "");
+    }
+  });
 }
 
 /* -------- Checklist card wiring (with styled, accessible checkboxes) -------- */
@@ -1088,100 +1202,21 @@ function wireChecklist(root) {
       if (!suppressSave) snapshotDayImmediate();
     });
 
-    edit.addEventListener("click", () => {
-      if (labelEl.isContentEditable) return;
-      const original = labelEl.textContent;
-      labelEl.contentEditable = "true";
-      labelEl.classList.add("outline-none");
-      row.removeAttribute("for");
-      cb.disabled = true;
-      labelEl.focus(); placeCaretEnd(labelEl);
-
-      function commit() {
-        labelEl.textContent = (labelEl.textContent || "").trim();
-        if (!labelEl.textContent) { li.remove(); syncCountsAndSave(false); edit.focus(); cleanup(); return; }
-
-        const isTime = TIME_KEYS.includes(cardKey);
-        const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard: isTime });
-        labelEl.textContent = capFirst(parsed.text || "");
-        if (!isTime) {
-          // Only reroute when a folder tag is explicitly present; otherwise keep existing folder
-          if (parsed.folders && parsed.folders.length) {
-            const dest = parsed.folders[0];
-            if (String(li.dataset.folder || "") !== String(dest)) {
-              moveItemToFolder(li, dest, cardKey, list);
-            }
-          }
-        }
-        labelEl.contentEditable = "false";
-        row.setAttribute("for", itemId);
-        cb.disabled = false;
-        syncCountsAndSave(false);
-        edit.focus();
-        labelEl.classList.remove("outline-none");
-        cleanup();
-      }
-      function cancel() {
-        labelEl.textContent = original;
-        labelEl.contentEditable = "false";
-        row.setAttribute("for", itemId);
-        cb.disabled = false;
-        edit.focus();
-        labelEl.classList.remove("outline-none");
-        cleanup();
-      }
-      function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
-      function cleanup() { labelEl.removeEventListener("keydown", onKey); labelEl.removeEventListener("blur", commit); }
-      labelEl.addEventListener("keydown", onKey);
-      labelEl.addEventListener("blur", commit);
+    wireRowInlineEdit(li, labelEl, edit, {
+      cardKey, list, isTimeCard,
+      onEditStart: () => { row.removeAttribute("for"); cb.disabled = true; },
+      onEditEnd: () => { row.setAttribute("for", itemId); cb.disabled = false; },
+      save: syncCountsAndSave,
     });
 
     del.addEventListener("click", () => { li.remove(); syncCountsAndSave(false); });
 
-    // DnD reorder + cross-folder move
-    li.addEventListener("dragstart", (e) => {
-      const t = e.target;
-      if (labelEl.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
-      DRAG_SRC = li;
-      li.classList.add("opacity-50");
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", itemId);
-    });
-    li.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
-    li.addEventListener("drop", (e) => {
-      e.preventDefault();
-      if (!DRAG_SRC || DRAG_SRC === li) return;
-      const items = [...list.children];
-      const src = items.indexOf(DRAG_SRC);
-      const dst = items.indexOf(li);
-      if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling); else list.insertBefore(DRAG_SRC, li);
-
-      // compute new folder by scanning previous headers
-      let p = DRAG_SRC.previousElementSibling; let newKey = "";
-      while (p) {
-        if (p.hasAttribute("data-folder-header")) { newKey = (p.dataset.folderHeader === "__none") ? "" : p.dataset.folderHeader; break; }
-        p = p.previousElementSibling;
-      }
-      DRAG_SRC.setAttribute("data-folder", isTimeCard ? "" : newKey);
-      syncCountsAndSave(false);
-    });
-    li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
+    wireRowDragReorder(li, labelEl, list, { itemId, isTimeCard, onMoved: () => syncCountsAndSave(false) });
 
     row.append(cb, boxWrap, labelEl);
     li.append(handle, row, edit, del);
 
-    let inserted = false;
-    if (!isTimeCard) {
-      ensureFolderHeader(list, cardKey, f);
-      const same = [...list.querySelectorAll(`li[data-folder="${f}"]`)];
-      const last = same.length ? same[same.length - 1] : null;
-      if (last) { list.insertBefore(li, last.nextSibling); inserted = true; }
-      else {
-        const header = list.querySelector(f ? `[data-folder-header="${f}"]` : `[data-folder-header="__none"]`);
-        if (header) { list.insertBefore(li, header.nextSibling); inserted = true; }
-      }
-    }
-    if (!inserted) list.appendChild(li);
+    insertIntoFolderGroup(list, li, f, cardKey);
 
     suppressSave = true;
     cb.checked = !!done; syncTick();
@@ -1204,25 +1239,10 @@ function wireChecklist(root) {
     const raw = (input.value || "").trim();
     if (!raw) return;
 
-    const isTimeCard = TIME_KEYS.includes(cardKey);
-    const entries = parseMultilineEntries(raw, { isTimeCard });
-
-    entries.forEach(({ del, text, folders }) => {
-      if (isTimeCard) { if (text) addItem(capFirst(text), false, false, ""); return; }
-      if (del) { deleteFolderCommand(list, cardKey, del); return; }
-
-      const haveFolders = folders && folders.length;
-      if (!text) {
-        if (haveFolders) { folders.forEach(f => ensureFolderHeader(list, cardKey, f)); syncCountsAndSave(false); }
-        return;
-      }
-
-      const norm = _norm(capFirst(text));
-      if (haveFolders) {
-        folders.forEach(f => { if (!findDupInFolder(list, f, norm)) addItem(capFirst(text), false, false, f); });
-      } else {
-        if (!findDupInFolder(list, "", norm)) addItem(capFirst(text), false, false, "");
-      }
+    processEntries(raw, {
+      list, cardKey, isTimeCard: TIME_KEYS.includes(cardKey),
+      addItem: (text, folder) => addItem(text, false, false, folder),
+      save: syncCountsAndSave,
     });
     input.value = "";
   });
@@ -1316,85 +1336,19 @@ function wireBullets(root) {
     const del = el("button", "px-2 py-1 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors", "✕");
     del.type = "button"; del.title = `Remove "${text}"`;
 
-    edit.addEventListener("click", () => {
-      if (labelEl.isContentEditable) return;
-      const original = labelEl.textContent;
-      labelEl.contentEditable = "true";
-      labelEl.classList.add("outline-none");
-      labelEl.focus(); placeCaretEnd(labelEl);
-
-      function commit() {
-        labelEl.textContent = (labelEl.textContent || "").trim();
-        if (!labelEl.textContent) { li.remove(); persist(false); edit.focus(); cleanup(); return; }
-
-        const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard: false });
-        labelEl.textContent = capFirst(parsed.text || "");
-        if (parsed.folders && parsed.folders.length) {
-          const dest = parsed.folders[0];
-          if (String(li.dataset.folder || "") !== String(dest)) {
-            moveItemToFolder(li, dest, key, list, () => persist(false));
-          }
-        }
-        labelEl.contentEditable = "false";
-        persist(false);
-        edit.focus();
-        labelEl.classList.remove("outline-none");
-        cleanup();
-      }
-      function cancel() {
-        labelEl.textContent = original;
-        labelEl.contentEditable = "false";
-        edit.focus();
-        labelEl.classList.remove("outline-none");
-        cleanup();
-      }
-      function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
-      function cleanup() { labelEl.removeEventListener("keydown", onKey); labelEl.removeEventListener("blur", commit); }
-      labelEl.addEventListener("keydown", onKey);
-      labelEl.addEventListener("blur", commit);
+    wireRowInlineEdit(li, labelEl, edit, {
+      cardKey: key, list,
+      save: persist,
+      moveOnSave: () => persist(false),
     });
 
     del.addEventListener("click", () => { li.remove(); persist(false); });
 
-    li.addEventListener("dragstart", (e) => {
-      const t = e.target;
-      if (labelEl.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
-      DRAG_SRC = li;
-      li.classList.add("opacity-50");
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", itemId);
-    });
-    li.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
-    li.addEventListener("drop", (e) => {
-      e.preventDefault();
-      if (!DRAG_SRC || DRAG_SRC === li) return;
-      const items = [...list.children];
-      const src = items.indexOf(DRAG_SRC);
-      const dst = items.indexOf(li);
-      if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling); else list.insertBefore(DRAG_SRC, li);
-
-      let p = DRAG_SRC.previousElementSibling; let newKey = "";
-      while (p) {
-        if (p.hasAttribute("data-folder-header")) { newKey = (p.dataset.folderHeader === "__none") ? "" : p.dataset.folderHeader; break; }
-        p = p.previousElementSibling;
-      }
-      DRAG_SRC.setAttribute("data-folder", newKey);
-      persist(false);
-    });
-    li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
+    wireRowDragReorder(li, labelEl, list, { itemId, onMoved: () => persist(false) });
 
     li.append(handle, labelEl, edit, del);
 
-    let inserted = false;
-    ensureFolderHeader(list, key, f);
-    const same = [...list.querySelectorAll(`li[data-folder="${f}"]`)];
-    const last = same.length ? same[same.length - 1] : null;
-    if (last) { list.insertBefore(li, last.nextSibling); inserted = true; }
-    else {
-      const header = list.querySelector(f ? `[data-folder-header="${f}"]` : `[data-folder-header="__none"]`);
-      if (header) { list.insertBefore(li, header.nextSibling); inserted = true; }
-    }
-    if (!inserted) list.appendChild(li);
+    insertIntoFolderGroup(list, li, f, key);
 
     if (!restoring) persist(false);
 
@@ -1404,23 +1358,11 @@ function wireBullets(root) {
 
   // submit text -> create headers and items using "item #tag/sub #tag2" syntax
   function addItemsFrom(raw) {
-    const entries = parseMultilineEntries(raw, { isTimeCard: false });
-
-    entries.forEach(({ del, text, folders }) => {
-      if (del) { deleteFolderCommand(list, key, del, () => persist(false)); return; }
-
-      const haveFolders = folders && folders.length;
-      if (!text) {
-        if (haveFolders) { folders.forEach(f => ensureFolderHeader(list, key, f)); persist(false); }
-        return;
-      }
-
-      const norm = _norm(capFirst(text));
-      if (haveFolders) {
-        folders.forEach(f => { if (!findDupInFolder(list, f, norm)) addItem(capFirst(text), false, f); });
-      } else {
-        if (!findDupInFolder(list, "", norm)) addItem(capFirst(text), false, "");
-      }
+    processEntries(raw, {
+      list, cardKey: key,
+      addItem: (text, folder) => addItem(text, false, folder),
+      save: persist,
+      deleteOnSave: () => persist(false),
     });
   }
 
@@ -2030,5 +1972,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
 });
+
+})();
 
 
