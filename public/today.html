@@ -27,87 +27,97 @@
         <img src="images/garland.png" alt="Morning Image" class="h-64 w-[50%] object-fill pt-10" />
     </header>
     <!-- Brown blocks section -->
-    <section class="flex gap-8 items-start">
-        <!-- Countdown card -->
-        <div class="bg-main p-8 rounded-lg relative">
-            <div data-countdown>
-                <!-- view mode -->
-                <div data-countdown-view class="hidden">
-                    <div class="flex items-start justify-between gap-3">
-                        <h3 data-countdown-title class="text-3xl font-main leading-loose text-white mb-2 pr-6 truncate">
-                        </h3>
+    <section class="flex justify-between">
+        <div class="flex gap-8">
+            <div class="bg-main p-8 rounded-lg relative">
+                <div data-countdown>
+                    <!-- view mode -->
+                    <div data-countdown-view class="hidden">
+                        <div class="flex items-start justify-between gap-3">
+                            <h3 data-countdown-title
+                                class="text-3xl font-main leading-loose text-white mb-2 pr-6 truncate">
+                            </h3>
 
-                        <!-- reset lives in the header, top-right (no absolute) -->
-                        <button type="button" data-countdown-reset class="p-2 shrink-0">
-                            <i class="fa-solid fa-rotate" style="color:#D9CBB3;"></i>
-                        </button>
-                    </div>
-
-                    <div class="mt-1 text-4xl font-main text-white">
-                        <span data-countdown-display class="inline-block min-w-[14ch]"
-                            style="font-variant-numeric: tabular-nums;">—</span>
-                    </div>
-
-                </div>
-
-                <!-- form mode -->
-                <div data-countdown-form class="flex flex-col gap-3">
-                    <div class="relative">
-                        <input id="cd-when" data-countdown-when type="datetime-local"
-                            class="px-3 py-2 pr-10 text-white font-sec focus:outline-none" />
-                        <button type="button" data-open-picker class="absolute right-2 top-1/2 -translate-y-1/2"
-                            aria-label="Open date picker">
-                            <i class="fa-regular fa-calendar" style="color:#D9CBB3;"></i>
-                        </button>
-                    </div>
-
-                    <div class="flex items-end gap-3">
-                        <div class="basis-3/4">
-                            <input id="cd-label" data-countdown-label type="text" aria-label="Countdown label"
-                                class="mt-1 leading-loose w-full border-b border-white px-3 py-2 focus:outline-none text-white font-sec"
-                                placeholder="Vacation, launch, etc." />
-                        </div>
-                        <div class="basis-[15%]">
-                            <button type="button" data-countdown-start
-                                class="w-full rounded-lg font-sec hover:bg-white text-white hover:text-neutral px-4 pt-3 pb-2 bg-neutral transition-colors">
-                                Set
+                            <!-- reset lives in the header, top-right (no absolute) -->
+                            <button type="button" data-countdown-reset class="p-2 shrink-0">
+                                <i class="fa-solid fa-rotate" style="color:#D9CBB3;"></i>
                             </button>
                         </div>
-                        <div class="flex-1"></div>
+
+                        <div class="mt-1 text-4xl font-main text-white">
+                            <span data-countdown-display class="inline-block min-w-[14ch]"
+                                style="font-variant-numeric: tabular-nums;">—</span>
+                        </div>
+
+                    </div>
+
+                    <!-- form mode -->
+                    <div data-countdown-form class="flex flex-col gap-3">
+                        <div class="relative">
+                            <input id="cd-when" data-countdown-when type="datetime-local"
+                                class="px-3 py-2 pr-10 text-white font-sec focus:outline-none" />
+                            <button type="button" data-open-picker class="absolute right-2 top-1/2 -translate-y-1/2"
+                                aria-label="Open date picker">
+                                <i class="fa-regular fa-calendar" style="color:#D9CBB3;"></i>
+                            </button>
+                        </div>
+
+                        <div class="flex items-end gap-3">
+                            <div class="basis-3/4">
+                                <input id="cd-label" data-countdown-label type="text" aria-label="Countdown label"
+                                    class="mt-1 leading-loose w-full border-b border-white px-3 py-2 focus:outline-none text-white font-sec"
+                                    placeholder="Vacation, launch, etc." />
+                            </div>
+                            <div class="basis-[15%]">
+                                <button type="button" data-countdown-start
+                                    class="w-full rounded-lg font-sec hover:bg-white text-white hover:text-neutral px-4 pt-3 pb-2 bg-neutral transition-colors">
+                                    Set
+                                </button>
+                            </div>
+                            <div class="flex-1"></div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Plan tomorrow button (no stretching) -->
-        <div class="flex gap-4 flex-col">
-            <a href="./tomorrow.html"
-                class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
-                Plan tomorrow...
-            </a>
-            <button type="button" data-action="endday" id="endday"
-                class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
-                End day!
-            </button>
-            <div class="flex items-center gap-3 mt-3">
-                <div class="text-white text-lg font-sec bg-main pt-3 px-4 rounded-lg flex gap-4">
-                    <span id="smokescount">0</span> <span id="smokescount-plus">+</span>
+            <!-- Plan tomorrow button (no stretching) -->
+            <div class="flex gap-4 flex-col">
+                <a href="./tomorrow.html"
+                    class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
+                    Plan tomorrow...
+                </a>
+                <button type="button" data-action="endday" id="endday"
+                    class="self-start text-center w-64 rounded-lg hover:bg-white px-4 pt-4 pb-2 hover:text-neutral font-sec bg-main text-white transition-colors">
+                    End day!
+                </button>
+                <div class="flex items-center gap-3 mt-3">
+                    <div class="text-white text-lg font-sec bg-main pt-3 px-4 rounded-lg flex gap-4">
+                        <span id="smokescount">0</span> <span id="smokescount-plus">+</span>
+                    </div>
+
+                    <button id="download-today" data-action="download" type="button"
+                        class="inline-flex items-center justify-center">
+                        <i class="fa-solid fa-file-arrow-down" style="color:white;"></i>
+                        <span class="sr-only">Download today</span>
+                    </button>
+
+                    <button id="restore" data-action="restore" class="inline-flex items-center justify-center">
+                        <i class="fa-solid fa-file-arrow-up" style="color:white;"></i>
+                        <span class="sr-only">Restore</span>
+                    </button>
                 </div>
 
-                <button id="download-today" data-action="download" type="button"
-                    class="inline-flex items-center justify-center">
-                    <i class="fa-solid fa-file-arrow-down" style="color:white;"></i>
-                    <span class="sr-only">Download today</span>
-                </button>
-
-                <button id="restore" data-action="restore" class="inline-flex items-center justify-center">
-                    <i class="fa-solid fa-file-arrow-up" style="color:white;"></i>
-                    <span class="sr-only">Restore</span>
-                </button>
             </div>
-
         </div>
-
+        <div class="relative flex gap-8">
+            <div class="max-h-fit self-center text-white bg-main text-6xl rounded-full font-main pb-3 px-3 mt-10 outline outline-maind">
+                +
+            </div>
+            <img src="images/drawer.png" alt="Drawer Image" class="max-h-44" />
+            <div class="bg-white max-w-fit rounded-full px-3 pt-1 pb-2 text-neutral shadow-inner shadow-inner-xl font-main underline underline-offset-2 absolute top-10 right-[-10px]">
+                12
+            </div>
+        </div>
 
     </section>
 

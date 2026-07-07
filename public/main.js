@@ -161,14 +161,12 @@ function carriedMetaEqual(a = {}, b = {}) {
 
 
 // Read bullets for a specific YYYY-MM-DD from storage
+const BULLET_KEYS = ["food", "notes"];
 function readBulletsForDate(ds) {
   const out = {};
-  const prefix = `${dayKeyFromDateStr(ds)}:bullets:`;
-  Object.keys(localStorage).forEach((k) => {
-    if (k.startsWith(prefix)) {
-      const listKey = k.slice(prefix.length);
-      out[listKey] = { type: "bullets", items: loadJSON(k, []) };
-    }
+  BULLET_KEYS.forEach((key) => {
+    const items = loadJSON(bulletsKey(key, ds), []);
+    out[key] = { items: Array.isArray(items) ? items : [] };
   });
   return out;
 }
@@ -417,6 +415,29 @@ function parseFolderDelete(line) {
   return m ? m[1].toLowerCase() : null;
 }
 
+// Split a submitted line/comma/newline blob into { del, text, folders } entries.
+// If only the last entry carries tags, those tags apply to all the untagged entries before it.
+function parseMultilineEntries(raw, { isTimeCard = false } = {}) {
+  const parts = String(raw || "").split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  const entries = parts.map(line => {
+    const del = parseFolderDelete(line);
+    const { text, folders } = parseItemAndTags(line, { isTimeCard });
+    return { line, del, text, folders };
+  });
+
+  if (!isTimeCard) {
+    const nonDel = entries.filter(e => !e.del);
+    if (nonDel.length > 1) {
+      const last = nonDel[nonDel.length - 1];
+      if ((last.folders?.length || 0) && nonDel.slice(0, -1).every(e => (e.folders?.length || 0) === 0)) {
+        const common = last.folders.slice();
+        nonDel.slice(0, -1).forEach(e => { e.folders = common.slice(); });
+      }
+    }
+  }
+  return entries;
+}
+
 // Unified UI state under "__ui"
 const UI_STATE_KEY = "__ui";
 
@@ -573,7 +594,7 @@ function ensureUnfiledHeaderIfNeeded(list, cardKey) {
   return ensureFolderHeader(list, cardKey, UNFILED_KEY);
 }
 
-function moveItemToFolder(li, destKey, cardKey, list) {
+function moveItemToFolder(li, destKey, cardKey, list, onSave = snapshotDay) {
   const label = li.querySelector('[data-role="label"]');
   const norm = _norm((label?.textContent || "").trim());
   if (li.dataset.folder === destKey) return;
@@ -582,7 +603,7 @@ function moveItemToFolder(li, destKey, cardKey, list) {
   if (findDupInFolder(list, destKey, norm)) {
     li.remove();
     updateFolderCounts(list);
-    snapshotDay();
+    onSave();
     return;
   }
 
@@ -606,10 +627,10 @@ function moveItemToFolder(li, destKey, cardKey, list) {
   else list.appendChild(li);
 
   updateFolderCounts(list);
-  snapshotDay();
+  onSave();
 }
 
-function deleteFolderCommand(list, cardKey, rawPath) {
+function deleteFolderCommand(list, cardKey, rawPath, onSave = snapshotDay) {
   const isTimeCard = TIME_KEYS.includes(cardKey);
   if (isTimeCard) return; // time cards don't have folders
 
@@ -623,16 +644,16 @@ function deleteFolderCommand(list, cardKey, rawPath) {
   if (path === UNFILED_KEY) {
     const hasItems = !!list.querySelector('li[data-folder=""]');
     if (hasItems) { alert('Cannot delete "Unfiled" while it has items.'); return; }
-    header.remove(); updateFolderCounts(list); snapshotDay(); return;
+    header.remove(); updateFolderCounts(list); onSave(); return;
   }
 
   // move items to Unfiled (creating header only if needed), then remove header
   const items = [...list.querySelectorAll(`li[data-folder="${path}"]`)];
   if (items.length) ensureUnfiledHeaderIfNeeded(list, cardKey);
-  items.forEach(li => moveItemToFolder(li, UNFILED_KEY, cardKey, list));
+  items.forEach(li => moveItemToFolder(li, UNFILED_KEY, cardKey, list, () => {})); // final onSave below persists once
   header.remove();
   updateFolderCounts(list);
-  snapshotDay();
+  onSave();
 }
 
 
@@ -833,6 +854,7 @@ function highlightCurrentBlock() {
 }
 
 /* -------- Checklist card wiring (with styled, accessible checkboxes) -------- */
+
 function wireChecklist(root) {
   const form = root.querySelector("[data-checklist-form]");
   const input = root.querySelector("[data-checklist-input]");
@@ -840,137 +862,14 @@ function wireChecklist(root) {
   if (!form || !input || !list) return;
   if (root.__wiredChecklist) return;
   root.__wiredChecklist = true;
+
   const cardKey = root.dataset.key || "card";
   let id = 0;
   let suppressSave = false;
 
-  // --- Templates: use the pre-rendered folder button ---
-  const toggleIcon = form.querySelector('button[type="button"] i.fa-folder-open');
-  const toggle = toggleIcon ? toggleIcon.closest('button') : null;
-
-  if (toggle) {
-    // wrap the toggle so the menu can be absolutely positioned
-    const wrap = el("div", "relative inline-flex items-center my-auto");
-    toggle.replaceWith(wrap);
-    wrap.appendChild(toggle);
-
-    const menu = el("div", "absolute right-0 top-full mt-1 w-64 font-sec bg-neutral border-neutral border-1 rounded-lg shadow-lg hidden z-20");
-    wrap.appendChild(menu);
-
-    function applyTemplate(items, preserveDone) {
-      // why: templates only for time cards; treat '#' literally
-      if (!TIME_KEYS.includes(cardKey)) return;
-
-      const have = new Set(
-        [...list.querySelectorAll('[data-role="label"]')]
-          .map(n => (n.textContent || "").trim().toLowerCase())
-      );
-
-      suppressSave = true;
-      (items || []).forEach(it => {
-        const text = capFirst(typeof it === "string" ? it : (it?.text || ""));
-        if (!text) return;
-        const k = text.toLowerCase();
-        if (have.has(k)) return;
-        addItem(text, preserveDone && !!it?.done); // no folder arg
-        have.add(k);
-      });
-      suppressSave = false;
-      snapshotDay();
-    }
-
-    // cleaner: hide with [hidden] so Tailwind enforces display:none !important
-    function hasTemplates() { return Object.keys(readTemplates()).length > 0; }
-    function updateTemplateToggle() {
-      wrap.hidden = !hasTemplates();
-      if (wrap.hidden) menu.classList.add("hidden");
-    }
-
-    // build rows once per open; delegate clicks
-    function rebuildMenu() {
-      const tpls = readTemplates();
-      menu.innerHTML = "";
-
-      const names = Object.keys(tpls).sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: "base" })
-      );
-
-      names.forEach(name => {
-        const row = el("div",
-          "flex items-center justify-between px-3 pt-4 pb-2 text-white hover:bg-white hover:text-neutral focus:bg-white focus:text-neutral");
-
-        const applyBtn = el("button", "text-left flex-1", name);
-        applyBtn.type = "button";
-        applyBtn.dataset.action = "tpl-apply";
-        applyBtn.dataset.tpl = name;
-
-        const delBtn = el("button",
-          "ml-2 px-2 py-1 rounded-md text-red-400 hover:text-red-700 transition-colors");
-        delBtn.type = "button";
-        delBtn.setAttribute("aria-label", `Delete template ${name}`);
-        delBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
-        delBtn.dataset.action = "tpl-del";
-        delBtn.dataset.tpl = name;
-
-        row.append(applyBtn, delBtn);
-        menu.appendChild(row);
-      });
-
-      if (!names.length) menu.classList.add("hidden");
-      updateTemplateToggle();
-    }
-
-    // single delegated handler
-    menu.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-action]");
-      if (!btn) return;
-      const name = btn.dataset.tpl;
-      if (btn.dataset.action === "tpl-apply") {
-        const tpls = readTemplates();
-        applyTemplate(tpls[name], e.altKey || e.metaKey);
-        menu.classList.add("hidden");
-        input.focus();
-      } else if (btn.dataset.action === "tpl-del") {
-        if (!confirm(`Delete template "${name}"?`)) return;
-        const store = readTemplates();
-        delete store[name];
-        saveTemplates(store);
-        document.dispatchEvent(new CustomEvent("templates:changed"));
-      }
-    });
-
-    toggle.addEventListener("click", () => { rebuildMenu(); menu.classList.toggle("hidden"); });
-    document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) menu.classList.add("hidden"); });
-    toggle.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.add("hidden"); });
-
-    document.addEventListener("templates:changed", () => { rebuildMenu(); updateTemplateToggle(); });
-    updateTemplateToggle();
-  }
-
-
-  // Save template button (time cards only)
-  const saveBtn = root.querySelector("[data-template-save]");
-  if (saveBtn) {
-    saveBtn.type = "button";
-    saveBtn.addEventListener("click", () => {
-      if (!TIME_KEYS.includes(cardKey)) { alert("Templates are for time blocks only."); return; } // why: prevent misuse
-
-      const name = (prompt("Template name?") || "").trim();
-      if (!name) return;
-
-      const items = [...root.querySelectorAll("[data-checklist-list] > li")].map(li => {
-        const label = li.querySelector('[data-role="label"]');
-        const cb = li.querySelector('input[type="checkbox"]');
-        return { text: (label?.textContent || "").trim(), done: !!cb?.checked };
-      }).filter(it => it.text);
-
-      if (!items.length) { alert("No items to save."); return; }
-
-      const store = readTemplates();
-      store[name] = items; // no folder field
-      saveTemplates(store);
-      document.dispatchEvent(new CustomEvent("templates:changed"));
-    });
+  function syncCountsAndSave(immediate = false) {
+    updateFolderCounts(list);
+    if (immediate) snapshotDayImmediate(); else snapshotDay();
   }
 
   function addItem(text, done = false, restoring = false, folder = "") {
@@ -988,7 +887,6 @@ function wireChecklist(root) {
     const itemId = `cb-${cardKey}-${id++}`;
     row.setAttribute("for", itemId);
 
-    // Accessible custom checkbox
     const cb = el("input", "sr-only");
     cb.type = "checkbox"; cb.id = itemId;
 
@@ -1019,30 +917,40 @@ function wireChecklist(root) {
     const del = el("button", "px-2 py-1 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors", "✕");
     del.type = "button"; del.title = `Remove "${text}"`;
 
-    // checkbox react
     cb.addEventListener("change", () => {
       syncTick();
       if (!suppressSave) snapshotDayImmediate();
     });
 
-
-    // inline edit (disable toggle while editing)
     edit.addEventListener("click", () => {
       if (labelEl.isContentEditable) return;
       const original = labelEl.textContent;
       labelEl.contentEditable = "true";
       labelEl.classList.add("outline-none");
-      row.removeAttribute("for"); // clicking label won't toggle
-      cb.disabled = true;         // checking disabled while editing
+      row.removeAttribute("for");
+      cb.disabled = true;
       labelEl.focus(); placeCaretEnd(labelEl);
 
       function commit() {
         labelEl.textContent = (labelEl.textContent || "").trim();
-        if (!labelEl.textContent) { li.remove(); updateFolderCounts(list); snapshotDay(); edit.focus(); cleanup(); return; }
+        if (!labelEl.textContent) { li.remove(); syncCountsAndSave(false); edit.focus(); cleanup(); return; }
+
+        const isTime = TIME_KEYS.includes(cardKey);
+        const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard: isTime });
+        labelEl.textContent = capFirst(parsed.text || "");
+        if (!isTime) {
+          // Only reroute when a folder tag is explicitly present; otherwise keep existing folder
+          if (parsed.folders && parsed.folders.length) {
+            const dest = parsed.folders[0];
+            if (String(li.dataset.folder || "") !== String(dest)) {
+              moveItemToFolder(li, dest, cardKey, list);
+            }
+          }
+        }
         labelEl.contentEditable = "false";
         row.setAttribute("for", itemId);
         cb.disabled = false;
-        snapshotDay();
+        syncCountsAndSave(false);
         edit.focus();
         labelEl.classList.remove("outline-none");
         cleanup();
@@ -1056,25 +964,15 @@ function wireChecklist(root) {
         labelEl.classList.remove("outline-none");
         cleanup();
       }
-      function onKey(e) {
-        if (e.key === "Enter") { e.preventDefault(); commit(); }
-        if (e.key === "Escape") { e.preventDefault(); cancel(); }
-      }
-      function cleanup() {
-        labelEl.removeEventListener("keydown", onKey);
-        labelEl.removeEventListener("blur", commit);
-      }
+      function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
+      function cleanup() { labelEl.removeEventListener("keydown", onKey); labelEl.removeEventListener("blur", commit); }
       labelEl.addEventListener("keydown", onKey);
       labelEl.addEventListener("blur", commit);
     });
 
-    del.addEventListener("click", () => {
-      li.remove();
-      updateFolderCounts(list);
-      if (!suppressSave) snapshotDay();
-    });
+    del.addEventListener("click", () => { li.remove(); syncCountsAndSave(false); });
 
-    // DnD (allow cross-folder moves; update folder key and counts)
+    // DnD reorder + cross-folder move
     li.addEventListener("dragstart", (e) => {
       const t = e.target;
       if (labelEl.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
@@ -1087,26 +985,19 @@ function wireChecklist(root) {
     li.addEventListener("drop", (e) => {
       e.preventDefault();
       if (!DRAG_SRC || DRAG_SRC === li) return;
-
       const items = [...list.children];
       const src = items.indexOf(DRAG_SRC);
       const dst = items.indexOf(li);
-      if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling);
-      else list.insertBefore(DRAG_SRC, li);
+      if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling); else list.insertBefore(DRAG_SRC, li);
 
-      // find new folder by scanning previous headers
-      let p = DRAG_SRC.previousElementSibling;
-      let newKey = "";
+      // compute new folder by scanning previous headers
+      let p = DRAG_SRC.previousElementSibling; let newKey = "";
       while (p) {
-        if (p.hasAttribute("data-folder-header")) {
-          newKey = (p.dataset.folderHeader === "__none") ? "" : p.dataset.folderHeader;
-          break;
-        }
+        if (p.hasAttribute("data-folder-header")) { newKey = (p.dataset.folderHeader === "__none") ? "" : p.dataset.folderHeader; break; }
         p = p.previousElementSibling;
       }
       DRAG_SRC.setAttribute("data-folder", isTimeCard ? "" : newKey);
-      updateFolderCounts(list);
-      snapshotDay();
+      syncCountsAndSave(false);
     });
     li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
 
@@ -1115,80 +1006,44 @@ function wireChecklist(root) {
 
     let inserted = false;
     if (!isTimeCard) {
-      // ensure header for this folder
       ensureFolderHeader(list, cardKey, f);
-
-      // append after the last item in the same folder (preserves order)
       const same = [...list.querySelectorAll(`li[data-folder="${f}"]`)];
       const last = same.length ? same[same.length - 1] : null;
       if (last) { list.insertBefore(li, last.nextSibling); inserted = true; }
       else {
-        const header = list.querySelector(f ? `[data-folder-header="${f}"]`
-          : `[data-folder-header="__none"]`);
+        const header = list.querySelector(f ? `[data-folder-header="${f}"]` : `[data-folder-header="__none"]`);
         if (header) { list.insertBefore(li, header.nextSibling); inserted = true; }
       }
     }
     if (!inserted) list.appendChild(li);
 
-
     suppressSave = true;
-    cb.checked = !!done;
-    syncTick();
+    cb.checked = !!done; syncTick();
     suppressSave = false;
 
-    if (!restoring) { updateFolderCounts(list); snapshotDay(); }
+    if (!restoring) syncCountsAndSave(false);
 
-    // honor collapsed state on add
     const st = getCardFolderState(cardKey);
     if (!isTimeCard && st[f] === true) li.classList.add("hidden");
   }
 
-  root.__addChecklistItem = (text, done = false, restoring = false, folder = "") =>
-    addItem(text, done, restoring, folder);
+  root.__addChecklistItem = (text, done = false, restoring = false, folder = "") => addItem(text, done, restoring, folder);
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const raw = (input.value || "").trim();
     if (!raw) return;
 
-    const parts = raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
     const isTimeCard = TIME_KEYS.includes(cardKey);
+    const entries = parseMultilineEntries(raw, { isTimeCard });
 
-    // parse all parts first
-    const entries = parts.map(line => {
-      const del = parseFolderDelete(line);
-      const { text, folders } = parseItemAndTags(line, { isTimeCard });
-      return { line, del, text, folders };
-    });
-
-    // propagate trailing tags (e.g., "a,b,c #work") to earlier items without tags
-    if (!isTimeCard) {
-      const nonDel = entries.filter(e => !e.del);
-      if (nonDel.length > 1) {
-        const last = nonDel[nonDel.length - 1];
-        if (last.folders.length && nonDel.slice(0, -1).every(e => e.folders.length === 0)) {
-          const common = last.folders.slice();
-          nonDel.slice(0, -1).forEach(e => { e.folders = common.slice(); });
-        }
-      }
-    }
-
-    // now handle each entry as before
-    entries.forEach(({ del, text, folders, line }) => {
-      if (isTimeCard) {
-        if (text) addItem(capFirst(text), false, false, "");
-        return;
-      }
-
+    entries.forEach(({ del, text, folders }) => {
+      if (isTimeCard) { if (text) addItem(capFirst(text), false, false, ""); return; }
       if (del) { deleteFolderCommand(list, cardKey, del); return; }
 
       const haveFolders = folders && folders.length;
       if (!text) {
-        if (haveFolders) {
-          folders.forEach(f => ensureFolderHeader(list, cardKey, f));
-          updateFolderCounts(list);
-          snapshotDay();
-        }
+        if (haveFolders) { folders.forEach(f => ensureFolderHeader(list, cardKey, f)); syncCountsAndSave(false); }
         return;
       }
 
@@ -1202,22 +1057,14 @@ function wireChecklist(root) {
     input.value = "";
   });
 
-
-
-
-
   input.addEventListener("blur", () => { input.value = capFirst(input.value); });
 
-  // folder header click: collapse/expand
   list.addEventListener("click", (e) => {
     const header = e.target.closest('li[data-folder-header]');
     if (!header) return;
-
     const caretIcon = e.target.closest('i.collapseFolderCaret');
     const folderKey = header.dataset.folderHeader === "__none" ? "" : header.dataset.folderHeader;
     const next = !header.hasAttribute("data-collapsed");
-
-    // Alt/Meta on the folder caret → toggle ALL folders in this card
     if (caretIcon && (e.altKey || e.metaKey)) {
       list.querySelectorAll('li[data-folder-header]').forEach(h => {
         const k = h.dataset.folderHeader === "__none" ? "" : h.dataset.folderHeader;
@@ -1225,15 +1072,13 @@ function wireChecklist(root) {
       });
       return;
     }
-
-    // Default → toggle just this folder
     setFolderCollapsed(list, cardKey, folderKey, next);
   });
 
-  // Smoke toggle (time cards)
   const smoke = root.querySelector("[data-smoke]");
   if (smoke) wireSmoke(smoke);
 }
+
 
 /* -------- Bullets (global Notes vs day-scoped Food, etc.) -------- */
 function wireBullets(root) {
@@ -1244,6 +1089,8 @@ function wireBullets(root) {
   if (!form || !input || !list) return;
   if (root.__wiredBullets) return;
   root.__wiredBullets = true;
+  let id = 0;
+
   list.addEventListener("click", (e) => {
     const header = e.target.closest('li[data-folder-header]');
     if (!header) return;
@@ -1263,127 +1110,89 @@ function wireBullets(root) {
     setFolderCollapsed(list, key, folderKey, next);
   });
 
-
-
-  function readItems() {
-    const v = loadJSON(bulletsKey(key), []);
-    if (Array.isArray(v)) return v;
-    if (v && typeof v === "object" && Array.isArray(v.items)) return v.items;
-    return [];
-  }
   function writeItems(items) {
     saveJSON(bulletsKey(key), items);
   }
   function currentItems() {
     return [...list.querySelectorAll('li[data-folder]')].map((li) => ({
-      text: (li.querySelector('[data-role="text"]')?.textContent || "").trim(),
+      text: (li.querySelector('[data-role="label"]')?.textContent || "").trim(),
       folder: li.dataset.folder || ""
     }));
   }
-
-
-  // submit text -> create headers and items using "item #tag/sub #tag2" syntax
-  function addItemsFrom(text) {
-    const parts = text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-    const entries = parts.map(line => {
-      const del = parseFolderDelete(line);
-      const { text: body, folders } = parseItemAndTags(line);
-      return { del, body, folders };
-    });
-
-    // propagate trailing tags to earlier items without tags
-    const nonDel = entries.filter(e => !e.del);
-    if (nonDel.length > 1) {
-      const last = nonDel[nonDel.length - 1];
-      if (last.folders.length && nonDel.slice(0, -1).every(e => e.folders.length === 0)) {
-        const common = last.folders.slice();
-        nonDel.slice(0, -1).forEach(e => { e.folders = common.slice(); });
-      }
-    }
-
-    entries.forEach(({ del, body, folders }) => {
-      if (del) {
-        deleteFolderCommand(list, key, del);
-        writeItems(currentItems());
-        return;
-      }
-
-      const haveFolders = folders && folders.length;
-      if (!body) {
-        if (haveFolders) {
-          folders.forEach(f => ensureFolderHeader(list, key, f));
-          updateFolderCounts(list);
-          snapshotDay();
-          writeItems(currentItems());
-        }
-        return;
-      }
-
-      const t = capFirst(body);
-      if (haveFolders) folders.forEach(f => addItem(t, false, f));
-      else addItem(t, false, "");
-    });
-
+  const persistDebounced = debounce(() => writeItems(currentItems()), 300);
+  function persist(immediate = false) {
+    updateFolderCounts(list);
+    if (immediate) writeItems(currentItems()); else persistDebounced();
   }
 
   function addItem(text, restoring = false, folder = "") {
     const f = String(folder || "");
-    ensureFolderHeader(list, key, f);
-
     const li = el("li", "mt-3 flex items-center gap-2 px-3");
     li.setAttribute("data-folder", f);
+    li.draggable = true;
 
-    const txt = el("span", "flex-1 text-accents font-bold tracking-wide text-xl font-sec");
-    txt.textContent = text;
-    txt.setAttribute("data-role", "text");
+    const handle = el("span", "ml-1 cursor-grab select-none text-accents/60", "⋮⋮");
+    handle.setAttribute("data-handle", "1");
+
+    const labelEl = el("span", "flex-1 text-accents font-bold tracking-wide text-xl font-sec");
+    labelEl.textContent = text;
+    labelEl.setAttribute("data-role", "label");
+
+    const itemId = `bl-${key}-${id++}`;
 
     const edit = el("button", "px-2 py-1 rounded-md text-accents/80 hover:text-white hover:bg-neutral transition-colors", "✎");
     edit.type = "button"; edit.title = "Edit";
 
     const del = el("button", "px-2 py-1 rounded-md text-red-400 hover:text-white hover:bg-neutral transition-colors", "✕");
-    del.type = "button"; del.title = "Remove"; del.setAttribute("aria-label", `Remove "${text}"`);
-
-    const handle = el("span", "ml-1 cursor-grab select-none text-accents/60", "⋮⋮");
-    handle.setAttribute("data-handle", "1");
-    li.draggable = true;
+    del.type = "button"; del.title = `Remove "${text}"`;
 
     edit.addEventListener("click", () => {
-      if (txt.isContentEditable) return;
-      const original = txt.textContent;
-      txt.contentEditable = "true";
-      txt.classList.add("outline-none");
-      txt.focus(); placeCaretEnd(txt);
+      if (labelEl.isContentEditable) return;
+      const original = labelEl.textContent;
+      labelEl.contentEditable = "true";
+      labelEl.classList.add("outline-none");
+      labelEl.focus(); placeCaretEnd(labelEl);
 
       function commit() {
-        txt.textContent = (txt.textContent || "").trim();
-        if (!txt.textContent) { li.remove(); updateFolderCounts(list); writeItems(currentItems()); edit.focus(); cleanup(); return; }
-        txt.contentEditable = "false";
-        writeItems(currentItems());
+        labelEl.textContent = (labelEl.textContent || "").trim();
+        if (!labelEl.textContent) { li.remove(); persist(false); edit.focus(); cleanup(); return; }
+
+        const parsed = parseItemAndTags(labelEl.textContent, { isTimeCard: false });
+        labelEl.textContent = capFirst(parsed.text || "");
+        if (parsed.folders && parsed.folders.length) {
+          const dest = parsed.folders[0];
+          if (String(li.dataset.folder || "") !== String(dest)) {
+            moveItemToFolder(li, dest, key, list, () => persist(false));
+          }
+        }
+        labelEl.contentEditable = "false";
+        persist(false);
         edit.focus();
-        txt.classList.remove("outline-none");
+        labelEl.classList.remove("outline-none");
         cleanup();
       }
       function cancel() {
-        txt.textContent = original; txt.contentEditable = "false"; edit.focus();
-        txt.classList.remove("outline-none");
+        labelEl.textContent = original;
+        labelEl.contentEditable = "false";
+        edit.focus();
+        labelEl.classList.remove("outline-none");
         cleanup();
       }
       function onKey(e) { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { e.preventDefault(); cancel(); } }
-      function cleanup() { txt.removeEventListener("keydown", onKey); txt.removeEventListener("blur", commit); }
-
-      txt.addEventListener("keydown", onKey);
-      txt.addEventListener("blur", commit);
+      function cleanup() { labelEl.removeEventListener("keydown", onKey); labelEl.removeEventListener("blur", commit); }
+      labelEl.addEventListener("keydown", onKey);
+      labelEl.addEventListener("blur", commit);
     });
 
-    del.addEventListener("click", () => { li.remove(); updateFolderCounts(list); writeItems(currentItems()); });
-
+    del.addEventListener("click", () => { li.remove(); persist(false); });
 
     li.addEventListener("dragstart", (e) => {
       const t = e.target;
-      if (txt.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
+      if (labelEl.isContentEditable || t.closest("button,input,[contenteditable='true']")) { e.preventDefault(); return; }
       DRAG_SRC = li;
       li.classList.add("opacity-50");
       e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", itemId);
     });
     li.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
     li.addEventListener("drop", (e) => {
@@ -1393,34 +1202,59 @@ function wireBullets(root) {
       const src = items.indexOf(DRAG_SRC);
       const dst = items.indexOf(li);
       if (src < dst) list.insertBefore(DRAG_SRC, li.nextSibling); else list.insertBefore(DRAG_SRC, li);
-      writeItems(currentItems());
+
+      let p = DRAG_SRC.previousElementSibling; let newKey = "";
+      while (p) {
+        if (p.hasAttribute("data-folder-header")) { newKey = (p.dataset.folderHeader === "__none") ? "" : p.dataset.folderHeader; break; }
+        p = p.previousElementSibling;
+      }
+      DRAG_SRC.setAttribute("data-folder", newKey);
+      persist(false);
     });
     li.addEventListener("dragend", () => { li.classList.remove("opacity-50"); DRAG_SRC = null; });
 
-    li.append(handle, txt, edit, del);
+    li.append(handle, labelEl, edit, del);
 
+    let inserted = false;
     ensureFolderHeader(list, key, f);
     const same = [...list.querySelectorAll(`li[data-folder="${f}"]`)];
     const last = same.length ? same[same.length - 1] : null;
-    if (last) list.insertBefore(li, last.nextSibling);
+    if (last) { list.insertBefore(li, last.nextSibling); inserted = true; }
     else {
-      const header = list.querySelector(f ? `[data-folder-header="${f}"]`
-        : `[data-folder-header="__none"]`);
-      if (header) list.insertBefore(li, header.nextSibling);
-      else list.appendChild(li);
+      const header = list.querySelector(f ? `[data-folder-header="${f}"]` : `[data-folder-header="__none"]`);
+      if (header) { list.insertBefore(li, header.nextSibling); inserted = true; }
     }
+    if (!inserted) list.appendChild(li);
 
-    if (!restoring) { updateFolderCounts(list); writeItems(currentItems()); }
+    if (!restoring) persist(false);
 
-    // honor collapsed state on add
     const st = getCardFolderState(key);
     if (st[f] === true) li.classList.add("hidden");
   }
 
+  // submit text -> create headers and items using "item #tag/sub #tag2" syntax
+  function addItemsFrom(raw) {
+    const entries = parseMultilineEntries(raw, { isTimeCard: false });
+
+    entries.forEach(({ del, text, folders }) => {
+      if (del) { deleteFolderCommand(list, key, del, () => persist(false)); return; }
+
+      const haveFolders = folders && folders.length;
+      if (!text) {
+        if (haveFolders) { folders.forEach(f => ensureFolderHeader(list, key, f)); persist(false); }
+        return;
+      }
+
+      const norm = _norm(capFirst(text));
+      if (haveFolders) {
+        folders.forEach(f => { if (!findDupInFolder(list, f, norm)) addItem(capFirst(text), false, f); });
+      } else {
+        if (!findDupInFolder(list, "", norm)) addItem(capFirst(text), false, "");
+      }
+    });
+  }
+
   list.innerHTML = "";
-  (readItems() || []).forEach(it =>
-    addItem(typeof it === "string" ? it : (it.text || ""), true,
-      typeof it === "object" ? (it.folder || "") : ""));
   updateFolderCounts(list);
 
   form.addEventListener("submit", (e) => {
@@ -1433,9 +1267,8 @@ function wireBullets(root) {
 
   input.addEventListener("blur", () => { input.value = capFirst(input.value); });
 
-  root.__addBulletItem = (text, restoring = false) => addItem(text, restoring);
+  root.__addBulletItem = (text, restoring = false, folder = "") => addItem(text, restoring, folder);
 }
-
 function wireCard(root) {
   if (root.matches("[data-checklist]")) { wireChecklist(root); return; }
   if (root.matches("[data-bullets]")) { wireBullets(root); return; }
@@ -1626,6 +1459,17 @@ function restoreAll() {
       smokeCb.dispatchEvent(new Event("change"));
     }
   });
+
+  document.querySelectorAll("[data-bullets][data-key]").forEach((card) => {
+    const key = card.dataset.key;
+    const list = card.querySelector("[data-bullets-list]");
+    if (list) list.innerHTML = "";
+
+    const items = loadJSON(bulletsKey(key), []);
+    const add = card.__addBulletItem;
+    (Array.isArray(items) ? items : []).forEach((it) => add && add(it.text, true, it.folder || ""));
+    if (list) updateFolderCounts(list);
+  });
 }
 
 
@@ -1650,18 +1494,16 @@ function collectChecklistsFromDOM() {
   return data;
 }
 function collectBulletsFromDOM() {
-  const out = {};
+  const data = {};
   document.querySelectorAll("[data-bullets][data-key]").forEach((card) => {
     const key = card.dataset.key;
-    if (key === "notes") return;
-    const items = [...card.querySelectorAll('[data-bullets-list] li[data-folder]')].map((li) => ({
-      text: (li.querySelector('[data-role="text"]')?.textContent || "").trim(),
+    const items = [...card.querySelectorAll("[data-bullets-list] > li[data-folder]")].map((li) => ({
+      text: (li.querySelector('[data-role="label"]')?.textContent || "").trim(),
       folder: li.dataset.folder || ""
     }));
-
-    out[key] = { type: "bullets", items };
+    data[key] = { items };
   });
-  return out;
+  return data;
 }
 
 /* -------- Snapshot helpers -------- */
