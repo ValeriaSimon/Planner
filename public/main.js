@@ -207,8 +207,12 @@ window.startFirebaseSync = function startFirebaseSync(user) {
   });
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "countdown"),
     d => REMOTE_CACHE.set("planner:countdown", d.data() || null));
-  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "drawer"),
-    d => REMOTE_CACHE.set(DRAWER_KEY, d.data()?.items || []));
+  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "drawer"), d => {
+    const next = d.data()?.items || [];
+    const changed = JSON.stringify(REMOTE_CACHE.get(DRAWER_KEY)) !== JSON.stringify(next);
+    REMOTE_CACHE.set(DRAWER_KEY, next);
+    if (changed) handleDrawerRemoteChange();
+  });
 };
 
 
@@ -1290,7 +1294,7 @@ function wireChecklist(root) {
         li.classList.toggle("opacity-30", cb.checked);
         moveItemByCheckedState(li, curCardKey, curList);
       }
-      if (!suppressSave) snapshotDayImmediate();
+      if (!suppressSave) snapshotDay();
     });
 
     wireRowInlineEdit(li, labelEl, edit, {
@@ -1632,6 +1636,18 @@ function restoreAll() {
   const sc = Number(dayData.__smokes);
   if (Number.isFinite(sc)) setSmokesCount(sc);
 
+  // Rebuild the smoke-counted dedup map from the current smoke flags before
+  // the per-card loop below dispatches "change" on each smoke checkbox.
+  // Otherwise wireSmoke's handler treats already-counted cards as uncounted
+  // (e.g. a restored backup with no/stale __smokeCounted) and re-increments
+  // the counter we just set from __smokes above.
+  const smokeCounted = {};
+  Object.keys(dayData).forEach((k) => {
+    if (dayData[k] && typeof dayData[k].smoke === "boolean") smokeCounted[k] = dayData[k].smoke;
+  });
+  dayData.__smokeCounted = smokeCounted;
+  saveJSON(dayKey(), dayData);
+
   // restore persisted empty-folder headers map
   const headersMap = dayData[folderHeadersKey()] || {};
 
@@ -1719,6 +1735,7 @@ function snapshotDayImmediate() {
   if (prev.__carried) next.__carried = prev.__carried;
   if (prev.__smokeCounted) next.__smokeCounted = prev.__smokeCounted;
   if (prev.__clearedDone) next.__clearedDone = prev.__clearedDone;
+  if (prev[UI_STATE_KEY]) next[UI_STATE_KEY] = prev[UI_STATE_KEY];
   saveJSON(key, next);
 
   // Only Today drives auto-syncs
@@ -1916,6 +1933,15 @@ function refreshDrawerBadge() {
   document.querySelectorAll("[data-drawer-badge]").forEach(b => { b.textContent = String(n); });
 }
 
+// Live-sync the drawer badge/list when the partner's device changes it remotely.
+function handleDrawerRemoteChange() {
+  refreshDrawerBadge();
+  const overlay = document.querySelector("[data-drawer-overlay]");
+  if (overlay && !overlay.classList.contains("hidden")) {
+    renderDrawerList(overlay.querySelector("[data-drawer-list]"));
+  }
+}
+
 function renderDrawerList(list) {
   if (!list) return;
   list.innerHTML = "";
@@ -2060,6 +2086,7 @@ function wireClearChecked() {
       if (cb?.checked) li.remove();
     });
 
+    updateFolderCounts(list);
     snapshotDay();
   });
 }
