@@ -1641,12 +1641,21 @@ function restoreAll() {
   // Otherwise wireSmoke's handler treats already-counted cards as uncounted
   // (e.g. a restored backup with no/stale __smokeCounted) and re-increments
   // the counter we just set from __smokes above.
+  //
+  // Only persist when it actually differs from what's stored: restoreAll()
+  // runs on every live-refresh (i.e. on nearly every edit's own Firestore
+  // echo), so an unconditional save here would turn a read-only render pass
+  // into a constant stream of full-document writes racing against whatever
+  // the user is doing at that moment (e.g. stomping a just-toggled checkbox
+  // or a just-collapsed folder a moment later).
   const smokeCounted = {};
   Object.keys(dayData).forEach((k) => {
     if (dayData[k] && typeof dayData[k].smoke === "boolean") smokeCounted[k] = dayData[k].smoke;
   });
-  dayData.__smokeCounted = smokeCounted;
-  saveJSON(dayKey(), dayData);
+  if (JSON.stringify(dayData.__smokeCounted || {}) !== JSON.stringify(smokeCounted)) {
+    dayData.__smokeCounted = smokeCounted;
+    saveJSON(dayKey(), dayData);
+  }
 
   // restore persisted empty-folder headers map
   const headersMap = dayData[folderHeadersKey()] || {};
