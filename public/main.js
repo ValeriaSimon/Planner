@@ -589,7 +589,7 @@ function parseItemAndTags(line, { isTimeCard = false } = {}) {
 
 // === Folder rules ===
 const FOLDER_MAXLEN = 48;           // full path cap
-const ALLOWED_CHARS = /[^a-z0-9 _\-\/]/gi;  // allow letters, digits, space, _ - /
+const ALLOWED_CHARS = /[^a-z0-9 _\-\/']/gi;  // allow letters, digits, space, _ - / '
 const UNFILED_KEY = "";             // internal key for Unfiled
 
 
@@ -624,7 +624,7 @@ function placeCaretEnd(el) {
 
 // "-folderName" command => delete that folder
 function parseFolderDelete(line) {
-  const m = String(line || "").trim().match(/^-\s*([a-z0-9 _\-\/]+)\s*$/i);
+  const m = String(line || "").trim().match(/^-\s*([a-z0-9 _\-\/']+)\s*$/i);
   return m ? m[1].toLowerCase() : null;
 }
 
@@ -1282,7 +1282,7 @@ function wireChecklist(root) {
       const curList = li.closest("[data-checklist-list]") ?? list;
       const curIsTimeCard = TIME_KEYS.includes(curCardKey);
       if (!curIsTimeCard) {
-        li.classList.toggle("opacity-60", cb.checked);
+        li.classList.toggle("opacity-30", cb.checked);
         moveItemByCheckedState(li, curCardKey, curList);
       }
       if (!suppressSave) snapshotDayImmediate();
@@ -1306,7 +1306,7 @@ function wireChecklist(root) {
     suppressSave = true;
     cb.checked = !!done; syncTick();
     if (!isTimeCard) {
-      li.classList.toggle("opacity-60", cb.checked);
+      li.classList.toggle("opacity-30", cb.checked);
       moveItemByCheckedState(li, cardKey, list);
     }
     suppressSave = false;
