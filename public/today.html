@@ -656,7 +656,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, deleteField } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDW5xBcbpHzWrFpO8LDA4vVt8qeenGqosw",
@@ -674,7 +674,7 @@
         window.firebaseServices = {
             auth, db,
             onAuthStateChanged, signOut,
-            doc, setDoc, getDoc, onSnapshot, collection
+            doc, setDoc, getDoc, onSnapshot, collection, deleteField
         };
 
         // tiny auth UI (sign-out only; signing in happens on index.html's password form)

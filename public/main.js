@@ -65,7 +65,15 @@ function bulletsKey(key, ds = null) {
 /* -------- JSON helpers -------- */
 const REMOTE_CACHE = new Map();
 function loadJSON(key, fallback) {
-  if (REMOTE_CACHE.has(key)) return REMOTE_CACHE.get(key);
+  // Clone on the way out: several call sites (writeUI, wireSmoke, wireClearChecked,
+  // ...) load this object, mutate a field in place, then pass the same object to
+  // saveJSON(). If we handed back the live REMOTE_CACHE reference, that in-place
+  // mutation would happen before saveJSON's own "what changed since last time"
+  // diff ever runs, so the diff would always see zero changes and silently skip
+  // the write. Cloning keeps the cached snapshot stable until saveJSON replaces it.
+  if (REMOTE_CACHE.has(key)) {
+    try { return structuredClone(REMOTE_CACHE.get(key)); } catch { return REMOTE_CACHE.get(key); }
+  }
   try {
     const raw = localStorage.getItem(key);
     if (raw != null) return JSON.parse(raw);
@@ -73,6 +81,7 @@ function loadJSON(key, fallback) {
   return fallback;
 }
 async function saveJSON(key, value) {
+  const prevCached = REMOTE_CACHE.has(key) ? REMOTE_CACHE.get(key) : undefined;
   REMOTE_CACHE.set(key, value);
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { }
 
@@ -88,10 +97,35 @@ async function saveJSON(key, value) {
   } else if (key === "planner:drawer") {
     await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "drawer"), { items: value || [] });
   } else if (m && m[1] && !m[2]) {
-    await FB.setDoc(FB.doc(FB.db, "users", u.uid, "days", m[1]), value || {});
+    await saveDayDocPatch(FB, u, m[1], prevCached, value);
   } else if (m && m[1] && m[2]) {
     await FB.setDoc(FB.doc(FB.db, "users", u.uid, "days", m[1], "bullets", m[2]), { items: value || [] });
   }
+}
+
+// The day doc holds many independently-owned top-level fields (each checklist
+// card, __ui, __smokes, __smokeCounted, ...). Both household members share one
+// Firestore account from separate devices, so a plain full-document setDoc()
+// here would race: whichever device's write reaches the server last silently
+// discards every field the other device touched (a collapsed folder, a
+// just-toggled checkbox). Instead, patch only the top-level fields that
+// actually changed since our last known snapshot, via mergeFields — which
+// replaces just those fields and leaves everything else on the server alone.
+// Falls back to a full write the first time (no prior snapshot to diff against).
+async function saveDayDocPatch(FB, user, ds, prevObj, nextObj) {
+  const prev = prevObj || {};
+  const next = nextObj || {};
+  const patch = {};
+  const fields = [];
+  Object.keys(next).forEach((k) => {
+    if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) { patch[k] = next[k]; fields.push(k); }
+  });
+  Object.keys(prev).forEach((k) => {
+    if (!(k in next)) { patch[k] = FB.deleteField(); fields.push(k); }
+  });
+  if (!fields.length) return;
+  const ref = FB.doc(FB.db, "users", user.uid, "days", ds);
+  await FB.setDoc(ref, patch, { mergeFields: fields });
 }
 
 
