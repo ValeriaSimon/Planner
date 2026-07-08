@@ -924,8 +924,8 @@ function cardEndHour(key) {
 }
 
 
-// Sync tomorrow from today. 
-function syncTomorrowFromToday(mode = "time") {
+// Sync tomorrow from today. Time-block cards (morning/daytime/evening) never carry over.
+function syncTomorrowFromToday() {
   // precedence: use Today DOM when on Today page, else use stored Today
   const todayFromDOM = (DAY_OFFSET === 0) ? collectChecklistsFromDOM() : null;
   const todayData = todayFromDOM || loadJSON(dayKey(0), {}) || {};
@@ -943,7 +943,7 @@ function syncTomorrowFromToday(mode = "time") {
   let headersChanged = false;
 
 
-  const keys = mode === "all" ? Object.keys(todayData) : TIME_KEYS;
+  const keys = Object.keys(todayData).filter((k) => !TIME_KEYS.includes(k));
 
   keys.forEach((key) => {
     const entry = todayData[key];
@@ -1020,7 +1020,7 @@ function syncTomorrowFromToday(mode = "time") {
 function debounce(fn, ms = 200) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
-const syncTomorrowDebounced = debounce((mode) => syncTomorrowFromToday(mode), 200);
+const syncTomorrowDebounced = debounce(() => syncTomorrowFromToday(), 200);
 
 
 
@@ -1717,20 +1717,7 @@ function snapshotDayImmediate() {
   saveJSON(key, next);
 
   // Only Today drives auto-syncs
-  if (DAY_OFFSET === 0) {
-    const prevHdrs = prev[folderHeadersKey()] || {};
-    const nextHdrs = next[folderHeadersKey()] || {};
-    const headersChanged = JSON.stringify(prevHdrs) !== JSON.stringify(nextHdrs);
-
-    if (headersChanged) {
-      // Propagate new/removed empty folder headers immediately across all cards
-      syncTomorrowFromToday("all");
-    } else {
-      // Keep frequent edits light: carry only time-blocks
-      syncTomorrowDebounced("time");
-    }
-  }
-
+  if (DAY_OFFSET === 0) syncTomorrowDebounced();
 }
 
 
@@ -1829,35 +1816,11 @@ function wireCountdown(root) {
 
 function collapsePastTimeCards() {
   if (DAY_OFFSET !== 0) return; // only on Today
-  const key = dayKey(0);
-  const data = loadJSON(key, {}) || {};
-  const ui = (data.__ui = data.__ui || { folders: {}, cards: { manual: {}, auto: {} } });
-  ui.cards.manual = ui.cards.manual || {};
-  ui.cards.auto = ui.cards.auto || {};
-  let moved = false;
-
-  for (let i = 0; i < TIME_KEYS.length; i++) {
-    const fromKey = TIME_KEYS[i];
-    const toKey = TIME_KEYS[i + 1];
-    const manual = !!ui.cards.manual[fromKey];
-    const shouldCollapse = new Date().getHours() >= cardEndHour(fromKey);
-    applyCollapsedUI(fromKey, shouldCollapse || manual);
-
-    if (shouldCollapse && !ui.cards.auto[fromKey] && toKey) {
-      const from = (data[fromKey]?.items) ? data[fromKey] : (data[fromKey] = { type: "checklist", items: [], smoke: false });
-      const to = (data[toKey]?.items) ? data[toKey] : (data[toKey] = { type: "checklist", items: [], smoke: false });
-
-      const carry = (from.items || []).filter((it) => !it.done);
-      const keep = (from.items || []).filter((it) => it.done);
-
-      to.items = [...carry, ...(to.items || [])];
-      from.items = keep;
-
-      ui.cards.auto[fromKey] = true;
-      moved = true;
-    }
-  }
-  if (moved) saveJSON(key, data);
+  const manual = getManualMap();
+  TIME_KEYS.forEach((key) => {
+    const shouldCollapse = new Date().getHours() >= cardEndHour(key);
+    applyCollapsedUI(key, shouldCollapse || !!manual[key]);
+  });
 }
 
 // Stores cleared done items under day.__clearedDone[cardKey] = [text,...]
@@ -1969,6 +1932,7 @@ async function onEndDay() {
   const carriedMeta = {};
 
   Object.keys(todayData || {}).forEach((key) => {
+    if (TIME_KEYS.includes(key)) return; // time cards never carry over
     const entry = todayData[key];
     if (entry?.type === "checklist" && Array.isArray(entry.items)) {
       const carry = entry.items.filter((it) => !it.done && _norm(it.text));
@@ -2029,9 +1993,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   wireClearButtons();
   wireClearChecked();
-  if (DAY_OFFSET === 1) syncTomorrowFromToday("all");
+  if (DAY_OFFSET === 1) syncTomorrowFromToday();
   restoreAll();
-  if (DAY_OFFSET === 0) syncTomorrowFromToday("all");
+  if (DAY_OFFSET === 0) syncTomorrowFromToday();
   collapsePastTimeCards();
   setInterval(collapsePastTimeCards, 5 * 60 * 1000);
 

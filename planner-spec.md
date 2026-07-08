@@ -56,7 +56,7 @@ Export format includes `{ version, date, day, bullets, notes }`.
   - Hours displayed (`data-start`, `data-end`).  
   - Highlight current block (scale up) in Today view. (Functions: `highlightCurrentBlock()`)  
   - Collapse automatically once end time passes. (Functions: `collapsePastTimeCards()`, `cardEndHour()`, `getCardBoundary()`)  
-  - Carry undone tasks forward automatically to next block on collapse. (Function: logic within `collapsePastTimeCards()`)
+  - No carryover: undone tasks stay on their own block and are never moved to the next block, to tomorrow, or archived by End Day.
 - **Other cards (Work, Home, Shopping, Food/Menu, Notes):**
   - Not time-bound.  
   - Manual collapse remembered in UI state. (Functions: `wireCarets()`, `applyCollapsedUI()`, `setManualCollapsed()`, `isManualCollapsed()`)  
@@ -95,7 +95,7 @@ Export format includes `{ version, date, day, bullets, notes }`.
 
 ### 4.6 End Day
 - Archives today’s tasks.  
-- Carries incomplete items to tomorrow.  
+- Carries incomplete items to tomorrow, except time-block cards (Morning/Daytime/Evening), which never carry over.  
 - Downloads two JSON files sequentially: today and tomorrow.  
 - Advances base date in localStorage.  
 - Redirects to refreshed Today view.
@@ -107,10 +107,8 @@ Export format includes `{ version, date, day, bullets, notes }`.
 - Otherwise alerts user to switch days.
 
 ### 4.8 Tomorrow Sync
-- Tomorrow view auto-syncs carried tasks from Today.  
-- Sync modes:
-  - `"time"` = time cards only (frequent).  
-  - `"all"` = all cards + headers (when needed).  
+- Tomorrow view auto-syncs carried tasks from Today, for all cards **except** the time-block cards (Morning/Daytime/Evening), which never carry over.
+- Runs on page load (Today and Tomorrow), and after every edit on Today (debounced ~200ms).
 - Prevents duplicates by tracking `__carried` keys.
 
 ## 5. UI Behavior
