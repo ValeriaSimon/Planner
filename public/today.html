@@ -116,12 +116,13 @@
             </div>
         </div>
         <div class="relative flex gap-8">
-            <div class="max-h-fit self-center text-white bg-main text-6xl rounded-full font-main pb-3 px-3 mt-10 outline outline-maind">
+            <div data-drawer-open-stash role="button" tabindex="0"
+                class="max-h-fit self-center text-white bg-main text-6xl rounded-full font-main pb-3 px-3 mt-10 outline outline-maind hover:cursor-pointer">
                 +
             </div>
-            <img src="images/drawer.png" alt="Drawer Image" class="max-h-44" />
+            <img data-drawer-open-list src="images/drawer.png" alt="Drawer Image" class="max-h-44 hover:cursor-pointer" />
             <div class="bg-white max-w-fit rounded-full px-3 pt-1 pb-2 text-neutral shadow-inner shadow-inner-xl font-main underline underline-offset-2 absolute top-10 right-[-10px]">
-                12
+                <span data-drawer-badge>0</span>
             </div>
         </div>
 
@@ -598,6 +599,57 @@
 
         </section>
 
+    </div>
+
+    <!-- Drawer overlay: stash items now, land them on a target date -->
+    <div data-drawer-overlay class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6">
+        <div class="bg-neutral w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl p-8 relative">
+            <button type="button" data-drawer-close class="absolute top-4 right-4 text-white text-2xl leading-none"
+                aria-label="Close drawer">&times;</button>
+
+            <div class="bg-white rounded-xl px-5 py-4">
+                <h1 class="text-4xl text-main font-main pb-6">Stash in drawer...</h1>
+                <form data-drawer-form class="flex flex-col gap-4">
+                    <input type="text" data-drawer-text placeholder="Take meds #am, buy a gift #shopping #ideas..."
+                        class="leading-loose text-xl w-full border-b border-neutral px-3 py-2 focus:outline-none text-main font-sec font-extrabold" />
+
+                    <div class="flex items-center gap-3">
+                        <div class="relative">
+                            <input type="date" data-drawer-date
+                                class="px-3 py-2 pr-10 text-neutral font-sec focus:outline-none border-b border-neutral" />
+                            <button type="button" data-open-picker class="absolute right-2 top-1/2 -translate-y-1/2"
+                                aria-label="Open date picker">
+                                <i class="fa-regular fa-calendar text-neutral"></i>
+                            </button>
+                        </div>
+
+                        <label class="flex items-center gap-2 text-neutral font-sec">
+                            <input type="checkbox" data-drawer-repeat-toggle />
+                            Repeat?
+                        </label>
+                        <select data-drawer-repeat-select
+                            class="hidden border border-neutral rounded-lg px-2 py-1 text-neutral font-sec">
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                        </select>
+                    </div>
+
+                    <div data-drawer-error class="hidden text-red-600 font-sec text-sm"></div>
+
+                    <button type="submit"
+                        class="self-start rounded-lg bg-main px-4 py-2 font-medium text-white hover:bg-neutral transition-colors duration-300 font-sec">
+                        Stash it
+                    </button>
+                </form>
+            </div>
+
+            <div class="bg-white rounded-xl px-5 py-4 mt-8">
+                <h1 class="text-4xl text-main font-main pb-6">Your drawer</h1>
+                <ul data-drawer-list class="flex flex-col gap-4"></ul>
+            </div>
+        </div>
     </div>
 
     <!-- Firebase boot + bridge -->

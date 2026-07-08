@@ -54,6 +54,7 @@ function dayKeyFromDateStr(ds) {
 }
 const GLOBAL_NOTES_KEY = "planner:notes";
 const GLOBAL_COUNTDOWN_KEY = "planner:countdown";
+const DRAWER_KEY = "planner:drawer";
 function bulletsKey(key, ds = null) {
   if (!key || key === "notes") return GLOBAL_NOTES_KEY;
   const base = ds ? dayKeyFromDateStr(ds) : dayKey();
@@ -84,6 +85,8 @@ async function saveJSON(key, value) {
     await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "notes"), { items: value || [] });
   } else if (key === "planner:countdown") {
     await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "countdown"), value || {});
+  } else if (key === "planner:drawer") {
+    await FB.setDoc(FB.doc(FB.db, "users", u.uid, "meta", "drawer"), { items: value || [] });
   } else if (m && m[1] && !m[2]) {
     await FB.setDoc(FB.doc(FB.db, "users", u.uid, "days", m[1]), value || {});
   } else if (m && m[1] && m[2]) {
@@ -204,6 +207,8 @@ window.startFirebaseSync = function startFirebaseSync(user) {
   });
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "countdown"),
     d => REMOTE_CACHE.set("planner:countdown", d.data() || null));
+  FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "drawer"),
+    d => REMOTE_CACHE.set(DRAWER_KEY, d.data()?.items || []));
 };
 
 
@@ -1814,6 +1819,198 @@ function wireCountdown(root) {
   });
 }
 
+/* -------- Drawer (global backlog: stash now, land on a target date) -------- */
+function readDrawer() { return loadJSON(DRAWER_KEY, []); }
+function writeDrawer(items) { saveJSON(DRAWER_KEY, items); }
+function drawerId() { return `drw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
+
+// Reserved tags (#am/#mid/#pm) plus every non-time card's own key/title become aliases for
+// its data-key. Time cards are ONLY reachable via the reserved am/mid/pm tags, never their
+// literal key, since a drawer item has no "current card" context to infer a folder tag from.
+function buildCardAliasMap() {
+  const map = new Map([["am", "morning"], ["mid", "daytime"], ["pm", "evening"]]);
+  document.querySelectorAll("[data-checklist][data-key],[data-bullets][data-key]").forEach(card => {
+    const key = card.dataset.key;
+    if (!key || TIME_KEYS.includes(key)) return;
+    map.set(normalizeFolderPath(key), key);
+    const titleText = (card.querySelector("h3")?.firstChild?.textContent || "").trim();
+    const slug = normalizeFolderPath(titleText);
+    if (slug) map.set(slug, key);
+  });
+  return map;
+}
+
+// The first tag that resolves via the alias map becomes the destination card; if that card
+// supports folders, the next tag (if any) becomes the sub-folder. Anything beyond is ignored.
+function resolveDrawerTarget(raw, aliasMap) {
+  const { text, folders } = parseItemAndTags(raw, { isTimeCard: false });
+  let cardKey = null, folder = "";
+  for (const tag of folders) {
+    if (!cardKey) {
+      const resolved = aliasMap.get(tag);
+      if (resolved) { cardKey = resolved; continue; }
+    } else if (!TIME_KEYS.includes(cardKey) && !folder) {
+      folder = tag;
+    }
+  }
+  return { text: capFirst(text), cardKey, folder };
+}
+
+function advanceDateOnce(ds, repeat) {
+  const d = new Date(ds + "T00:00:00");
+  if (repeat === "daily") d.setDate(d.getDate() + 1);
+  else if (repeat === "weekly") d.setDate(d.getDate() + 7);
+  else if (repeat === "monthly") d.setMonth(d.getMonth() + 1);
+  else if (repeat === "yearly") d.setFullYear(d.getFullYear() + 1);
+  return ymd(d);
+}
+// Loop until strictly past the landing date: no matter how many cycles were missed, a
+// recurring item lands once per catch-up and jumps straight to its next future occurrence.
+function fastForwardTargetDate(targetDate, repeat, ds) {
+  let next = targetDate, guard = 0;
+  while (next <= ds && guard++ < 10000) next = advanceDateOnce(next, repeat);
+  return next;
+}
+
+function isBulletsCardKey(cardKey) {
+  return !!document.querySelector(`[data-bullets][data-key="${cardKey}"]`);
+}
+
+// Drawer is only ever surfaced on today.html, so the target card is always already rendered.
+// Appends via the card's exposed add-item hook (goes through the normal save/debounce path).
+// Returns false if the card isn't found, e.g. a stale cardKey from a past HTML edit.
+function landItem(item) {
+  const isBullets = isBulletsCardKey(item.cardKey);
+  const sel = isBullets ? `[data-bullets][data-key="${item.cardKey}"]` : `[data-checklist][data-key="${item.cardKey}"]`;
+  const card = document.querySelector(sel);
+  if (isBullets && card?.__addBulletItem) { card.__addBulletItem(item.text, false, item.folder); return true; }
+  if (!isBullets && card?.__addChecklistItem) { card.__addChecklistItem(item.text, false, false, item.folder); return true; }
+  return false;
+}
+
+// On-or-before catch-up: an item lands the first time today's date reaches or passes its
+// target date. Non-recurring items are dropped from the drawer once landed; recurring items
+// stay, with targetDate fast-forwarded past `ds`. Items whose card can't be found (landItem
+// returns false) are left in the drawer to retry on the next load, rather than silently lost.
+function processDrawerForDate(ds) {
+  const items = readDrawer();
+  if (!items.length) return;
+  const remaining = [];
+  let changed = false;
+  items.forEach(item => {
+    const due = item.targetDate <= ds && item.lastLandedDate !== ds;
+    if (!due) { remaining.push(item); return; }
+    if (!landItem(item)) { remaining.push(item); return; }
+    changed = true;
+    if (item.repeat && item.repeat !== "none") {
+      item.lastLandedDate = ds;
+      item.targetDate = fastForwardTargetDate(item.targetDate, item.repeat, ds);
+      remaining.push(item);
+    }
+  });
+  if (changed) writeDrawer(remaining);
+}
+
+function refreshDrawerBadge() {
+  const n = readDrawer().length;
+  document.querySelectorAll("[data-drawer-badge]").forEach(b => { b.textContent = String(n); });
+}
+
+function renderDrawerList(list) {
+  if (!list) return;
+  list.innerHTML = "";
+  const items = readDrawer().slice().sort((a, b) => a.targetDate < b.targetDate ? -1 : a.targetDate > b.targetDate ? 1 : 0);
+  items.forEach(item => {
+    const li = el("li", "flex justify-between items-center gap-3");
+    const left = el("div", "flex flex-col");
+    const label = el("span", "text-neutral font-sec", item.text);
+    const meta = el("span", "text-neutral/60 font-sec text-sm",
+      `${item.targetDate} · ${displayFolder(item.cardKey)}${item.folder ? ` / ${displayFolder(item.folder)}` : ""}${item.repeat && item.repeat !== "none" ? ` · ${capFirst(item.repeat)}` : ""}`);
+    left.append(label, meta);
+    const del = el("button", "text-red-500 hover:text-red-900");
+    del.type = "button";
+    del.appendChild(el("i", "fa-solid fa-trash"));
+    del.addEventListener("click", () => {
+      writeDrawer(readDrawer().filter(it => it.id !== item.id));
+      renderDrawerList(list);
+      refreshDrawerBadge();
+    });
+    li.append(left, del);
+    list.appendChild(li);
+  });
+}
+
+function wireDrawerModal() {
+  const overlay = document.querySelector("[data-drawer-overlay]");
+  if (!overlay) return;
+
+  const aliasMap = buildCardAliasMap();
+  const form = overlay.querySelector("[data-drawer-form]");
+  const textIn = overlay.querySelector("[data-drawer-text]");
+  const dateIn = overlay.querySelector("[data-drawer-date]");
+  const errorEl = overlay.querySelector("[data-drawer-error]");
+  const repeatToggle = overlay.querySelector("[data-drawer-repeat-toggle]");
+  const repeatSelect = overlay.querySelector("[data-drawer-repeat-select]");
+  const list = overlay.querySelector("[data-drawer-list]");
+
+  function openOverlay() { renderDrawerList(list); overlay.classList.remove("hidden"); textIn?.focus(); }
+  function closeOverlay() { overlay.classList.add("hidden"); }
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.closest("[data-drawer-close]")) closeOverlay();
+  });
+
+  repeatToggle?.addEventListener("change", () => {
+    repeatSelect?.classList.toggle("hidden", !repeatToggle.checked);
+  });
+
+  overlay.querySelectorAll("[data-open-picker]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (dateIn && typeof dateIn.showPicker === "function") dateIn.showPicker();
+      else dateIn?.focus();
+    });
+  });
+
+  form?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const raw = (textIn?.value || "").trim();
+    const targetDate = dateIn?.value || "";
+    const { text, cardKey, folder } = resolveDrawerTarget(raw, aliasMap);
+
+    if (!targetDate || !text || !cardKey) {
+      if (errorEl) {
+        errorEl.textContent = !targetDate
+          ? "Pick a target date."
+          : (!text ? "Type something to stash." : "Add a destination tag (e.g. #am, #shopping).");
+        errorEl.classList.remove("hidden");
+      }
+      return;
+    }
+    errorEl?.classList.add("hidden");
+
+    const item = {
+      id: drawerId(), rawText: raw, text, cardKey, folder,
+      targetDate, targetTime: null,
+      repeat: repeatToggle?.checked ? (repeatSelect?.value || "daily") : "none",
+      lastLandedDate: null,
+      createdAt: new Date().toISOString(),
+    };
+    writeDrawer([...readDrawer(), item]);
+
+    form.reset();
+    repeatSelect?.classList.add("hidden");
+    processDrawerForDate(ymd(getPlannerDate(DAY_OFFSET)));
+    renderDrawerList(list);
+    refreshDrawerBadge();
+  });
+
+  document.querySelectorAll("[data-drawer-open-stash],[data-drawer-open-list]").forEach(trigger => {
+    trigger.addEventListener("click", openOverlay);
+  });
+
+  refreshDrawerBadge();
+}
+
 function collapsePastTimeCards() {
   if (DAY_OFFSET !== 0) return; // only on Today
   const manual = getManualMap();
@@ -1996,6 +2193,14 @@ document.addEventListener("DOMContentLoaded", () => {
   if (DAY_OFFSET === 1) syncTomorrowFromToday();
   restoreAll();
   if (DAY_OFFSET === 0) syncTomorrowFromToday();
+
+  // Drawer only lives on today.html: it's a today-only backlog, never surfaced on tomorrow.html.
+  if (DAY_OFFSET === 0) {
+    wireDrawerModal();
+    processDrawerForDate(ymd(getPlannerDate(0)));
+    refreshDrawerBadge();
+  }
+
   collapsePastTimeCards();
   setInterval(collapsePastTimeCards, 5 * 60 * 1000);
 
