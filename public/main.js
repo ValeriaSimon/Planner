@@ -64,6 +64,22 @@ function bulletsKey(key, ds = null) {
 
 /* -------- JSON helpers -------- */
 const REMOTE_CACHE = new Map();
+// Order-insensitive stand-in for JSON.stringify equality checks. Firestore's
+// SDK does not preserve local object key insertion order when it returns
+// doc.data(), so a plain JSON.stringify(a) !== JSON.stringify(b) comparison
+// reports "changed" for semantically-identical objects whenever the key
+// order differs — which is every single time data round-trips through
+// Firestore. That false positive made restoreAll() (and this file's own
+// day-doc write patching) fire on nearly every edit's own echo, discarding
+// whatever the user was mid-typing/mid-toggling. Confirmed live: comparing
+// a freshly-loaded local day object against the same doc re-fetched from
+// Firestore produced different JSON.stringify output despite identical data.
+function stableStringify(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+}
+
 function loadJSON(key, fallback) {
   // Clone on the way out: several call sites (writeUI, wireSmoke, wireClearChecked,
   // ...) load this object, mutate a field in place, then pass the same object to
@@ -118,7 +134,7 @@ async function saveDayDocPatch(FB, user, ds, prevObj, nextObj) {
   const patch = {};
   const fields = [];
   Object.keys(next).forEach((k) => {
-    if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) { patch[k] = next[k]; fields.push(k); }
+    if (stableStringify(prev[k]) !== stableStringify(next[k])) { patch[k] = next[k]; fields.push(k); }
   });
   Object.keys(prev).forEach((k) => {
     if (!(k in next)) { patch[k] = FB.deleteField(); fields.push(k); }
@@ -137,6 +153,9 @@ function isSafeToRerenderNow() {
   if (DRAG_SRC) return false;
   if (ENDING_DAY) return false;
   if (document.querySelector('[contenteditable="true"]')) return false;
+  // A checklist/bullets edit is still debounced and hasn't reached storage yet —
+  // rebuilding from storage now would silently discard it. Wait for the flush.
+  if (snapshotDay.pending) return false;
   return true;
 }
 let liveRefreshRetries = 0;
@@ -213,7 +232,7 @@ window.startFirebaseSync = function startFirebaseSync(user) {
     // store unsubs so repeated inits don't stack listeners
     const unsubDay = FB.onSnapshot(ref, d => {
       const next = d.exists() ? (d.data() || {}) : {};
-      const changed = JSON.stringify(REMOTE_CACHE.get(dayKeyStr)) !== JSON.stringify(next);
+      const changed = stableStringify(REMOTE_CACHE.get(dayKeyStr)) !== stableStringify(next);
       REMOTE_CACHE.set(dayKeyStr, next);
       if (changed && isCurrentPageDay) liveRefreshDebounced();
     });
@@ -225,7 +244,7 @@ window.startFirebaseSync = function startFirebaseSync(user) {
       qs.forEach(docSnap => {
         const bulletsKeyStr = `planner:${ds}:bullets:${docSnap.id}`;
         const next = docSnap.data()?.items || [];
-        if (JSON.stringify(REMOTE_CACHE.get(bulletsKeyStr)) !== JSON.stringify(next)) changed = true;
+        if (stableStringify(REMOTE_CACHE.get(bulletsKeyStr)) !== stableStringify(next)) changed = true;
         REMOTE_CACHE.set(bulletsKeyStr, next);
       });
       if (changed && isCurrentPageDay) liveRefreshDebounced();
@@ -235,7 +254,7 @@ window.startFirebaseSync = function startFirebaseSync(user) {
 
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "notes"), d => {
     const next = d.data()?.items || [];
-    const changed = JSON.stringify(REMOTE_CACHE.get("planner:notes")) !== JSON.stringify(next);
+    const changed = stableStringify(REMOTE_CACHE.get("planner:notes")) !== stableStringify(next);
     REMOTE_CACHE.set("planner:notes", next);
     if (changed) liveRefreshDebounced();
   });
@@ -243,7 +262,7 @@ window.startFirebaseSync = function startFirebaseSync(user) {
     d => REMOTE_CACHE.set("planner:countdown", d.data() || null));
   FB.onSnapshot(FB.doc(FB.db, "users", user.uid, "meta", "drawer"), d => {
     const next = d.data()?.items || [];
-    const changed = JSON.stringify(REMOTE_CACHE.get(DRAWER_KEY)) !== JSON.stringify(next);
+    const changed = stableStringify(REMOTE_CACHE.get(DRAWER_KEY)) !== stableStringify(next);
     REMOTE_CACHE.set(DRAWER_KEY, next);
     if (changed) handleDrawerRemoteChange();
   });
@@ -1061,7 +1080,14 @@ function syncTomorrowFromToday() {
 
 // --- debounced sync trigger
 function debounce(fn, ms = 200) {
-  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  let t;
+  const wrapped = (...a) => {
+    clearTimeout(t);
+    wrapped.pending = true;
+    t = setTimeout(() => { wrapped.pending = false; fn(...a); }, ms);
+  };
+  wrapped.pending = false;
+  return wrapped;
 }
 const syncTomorrowDebounced = debounce(() => syncTomorrowFromToday(), 200);
 
@@ -1686,7 +1712,7 @@ function restoreAll() {
   Object.keys(dayData).forEach((k) => {
     if (dayData[k] && typeof dayData[k].smoke === "boolean") smokeCounted[k] = dayData[k].smoke;
   });
-  if (JSON.stringify(dayData.__smokeCounted || {}) !== JSON.stringify(smokeCounted)) {
+  if (stableStringify(dayData.__smokeCounted || {}) !== stableStringify(smokeCounted)) {
     dayData.__smokeCounted = smokeCounted;
     saveJSON(dayKey(), dayData);
   }
