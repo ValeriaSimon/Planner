@@ -482,6 +482,7 @@ function buildExport(offset) {
       day: dayObj,
       bullets,
       notes: loadJSON(GLOBAL_NOTES_KEY, []),
+      drawer: readDrawer(),
     },
   };
 }
@@ -693,7 +694,7 @@ function parseFolderDelete(line) {
 // Split a submitted line/comma/newline blob into { del, text, folders } entries.
 // If only the last entry carries tags, those tags apply to all the untagged entries before it.
 function parseMultilineEntries(raw, { isTimeCard = false } = {}) {
-  const parts = String(raw || "").split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  const parts = String(raw || "").split(/[\n;]+/).map(s => s.trim()).filter(Boolean);
   const entries = parts.map(line => {
     const del = parseFolderDelete(line);
     const { text, folders } = parseItemAndTags(line, { isTimeCard });
@@ -2099,7 +2100,7 @@ function wireDrawerModal() {
     refreshDrawerBadge();
   });
 
-  document.querySelectorAll("[data-drawer-open-stash],[data-drawer-open-list]").forEach(trigger => {
+  document.querySelectorAll("[data-drawer-open-list]").forEach(trigger => {
     trigger.addEventListener("click", openOverlay);
   });
 
