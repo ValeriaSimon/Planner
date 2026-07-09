@@ -2204,8 +2204,18 @@ async function onRestore() {
     await Promise.all(tasks);
 
     const currentDS = ymd(getPlannerDate(DAY_OFFSET));
-    if (ds === currentDS) location.reload();
-    else alert(`Restored ${ds}. Switch to that day to view it.`);
+    if (ds === currentDS) {
+      // Restoring today's backup can leave tomorrow's carried-over items stale or
+      // duplicated, since the incremental carry-over sync no longer matches what's
+      // actually in the restored data. Wipe tomorrow so the on-load sync below
+      // rebuilds it fresh, purely from the just-restored today.
+      const tomorrowDS = ymd(getPlannerDate(1));
+      await saveJSON(dayKeyFromDateStr(tomorrowDS), {});
+      await saveJSON(bulletsKey("food", tomorrowDS), []);
+      location.reload();
+    } else {
+      alert(`Restored ${ds}. Switch to that day to view it.`);
+    }
   } catch {
     alert("Restore failed. Pick a valid planner JSON.");
   }
