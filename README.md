@@ -1,9 +1,10 @@
 # Planner
 
-A personal daily/tomorrow planner. Next.js only handles routing (`next.config.mjs` rewrites) and a keepalive
-ping (`pages/keepalive.js`); the actual app is static HTML/JS served from `public/` (`index.html` = sign-in,
-`today.html` / `tomorrow.html` = the planner views, `main.js` = all the DOM wiring). State lives in
-localStorage, synced to Firebase Auth + Firestore when signed in. Tailwind v4 compiles `input.css` -> `public/output.css`.
+A personal daily/tomorrow planner. Plain static HTML/JS served from `public/` (`index.html` = sign-in,
+`today.html` / `tomorrow.html` = the planner views, `src/` = ES modules, loaded via `<script type="module">`,
+no build step). State lives in localStorage, synced to Firebase Auth + Firestore when signed in. Tailwind v4
+compiles `input.css` -> `public/output.css`. Deployed on Vercel as a static site (`vercel.json`); `cleanUrls`
+gives you `/`, `/today`, `/tomorrow` without the `.html` extension.
 
 See [planner-spec.md](planner-spec.md) for the full functional spec.
 
@@ -15,7 +16,7 @@ Run this in a separate terminal while working on styles (watches `input.css` and
 npx tailwindcss -i ./input.css -o ./public/output.css --watch
 ```
 
-Then `npm run dev` to run the Next.js dev server.
+Then `npm run dev` to serve `public/` locally (edit a file, refresh the browser — no build step).
 
 ## Reset local planner data (paste in browser console, localhost only)
 
